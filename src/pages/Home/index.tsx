@@ -6,13 +6,15 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
-import type { NewsItem, NewsTopic } from '../../types/news';
+import type { NewsTopic } from '../../types/news';
 import { GridStory } from './components/GridStory';
 import { LeadStory } from './components/LeadStory';
 import { Masthead } from './components/Masthead';
+import { ReadHeadline } from './components/ReadHeadline';
 import { SearchResults } from './components/SearchResults';
 import { SidebarStory } from './components/SidebarStory';
 import { TopicFilter } from './components/TopicFilter';
+import { pickEditionEntries } from './edition';
 import { useHome } from './hooks/useHome';
 
 export function HomePage() {
@@ -35,16 +37,16 @@ export function HomePage() {
     clearSearch,
   } = useHome();
   const [topic, setTopic] = useState<NewsTopic | 'all'>('all');
-  const visibleItems = useMemo(() => {
-    const unread = items.filter((item) => !readIds.has(item.id));
-    return topic === 'all' ? unread : unread.filter((item) => item.topic === topic);
-  }, [items, readIds, topic]);
-  const lead: NewsItem | undefined = visibleItems[0];
-  const others = visibleItems.filter((item) => item.id !== lead?.id);
+  const edition = useMemo(
+    () => pickEditionEntries(items, readIds, topic),
+    [items, readIds, topic],
+  );
+  const lead = edition[0];
+  const others = edition.slice(1);
   const sidebar = topic === 'all' ? others.slice(0, 3) : [];
   const rest = topic === 'all' ? others.slice(3) : others;
   const editionRead =
-    status === 'success' && items.length > 0 && visibleItems.length === 0;
+    status === 'success' && items.length > 0 && edition.length === 0;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -105,17 +107,17 @@ export function HomePage() {
           ) : null}
 
           {searchStatus === 'idle' &&
-          (status === 'empty' || (status === 'success' && visibleItems.length === 0)) ? (
+          (status === 'empty' || (status === 'success' && edition.length === 0)) ? (
             <Box sx={{ py: 10, textAlign: 'center', maxWidth: 520, mx: 'auto' }}>
               <Typography variant="overline" color="primary">
                 Edição em branco
               </Typography>
               <Typography variant="h3" sx={{ mt: 1, mb: 1.5, fontSize: '2rem' }}>
-                {editionRead ? 'Você já leu esta edição.' : 'Ainda não há o que ler neste recorte.'}
+                {editionRead ? 'Nada recente para mostrar neste recorte.' : 'Ainda não há o que ler neste recorte.'}
               </Typography>
               <Typography color="text.secondary">
                 {editionRead
-                  ? 'As matérias lidas saíram da página. Atualize a edição para puxar a próxima de cada editoria, se houver.'
+                  ? 'As lidas com mais de uma semana saem da capa. Atualize a edição para buscar algo novo em cada editoria.'
                   : 'Atualize a edição para puxar a notícia mais recente de cada editoria.'}
               </Typography>
             </Box>
@@ -128,7 +130,11 @@ export function HomePage() {
               </Typography>
               <Grid container spacing={0} sx={{ alignItems: 'flex-start' }}>
                 <Grid size={{ xs: 12, md: sidebar.length > 0 ? 8 : 12 }}>
-                  <LeadStory item={lead} read={readIds.has(lead.id)} onRead={markRead} />
+                  {lead.mode === 'headline' ? (
+                    <ReadHeadline item={lead.item} variant="lead" />
+                  ) : (
+                    <LeadStory item={lead.item} read={false} onRead={markRead} />
+                  )}
                 </Grid>
                 {sidebar.length > 0 ? (
                   <Grid
@@ -145,14 +151,18 @@ export function HomePage() {
                     <Typography variant="overline" sx={{ display: 'block', mb: 1 }}>
                       Também nesta edição
                     </Typography>
-                    {sidebar.map((item) => (
-                      <SidebarStory
-                        key={item.id}
-                        item={item}
-                        read={readIds.has(item.id)}
-                        onRead={markRead}
-                      />
-                    ))}
+                    {sidebar.map((entry) =>
+                      entry.mode === 'headline' ? (
+                        <ReadHeadline key={entry.item.id} item={entry.item} variant="sidebar" />
+                      ) : (
+                        <SidebarStory
+                          key={entry.item.id}
+                          item={entry.item}
+                          read={false}
+                          onRead={markRead}
+                        />
+                      ),
+                    )}
                   </Grid>
                 ) : null}
               </Grid>
@@ -163,16 +173,20 @@ export function HomePage() {
                     Outras editorias
                   </Typography>
                   <Grid container spacing={0}>
-                    {rest.map((item) => (
+                    {rest.map((entry) => (
                       <Grid
-                        key={item.id}
+                        key={entry.item.id}
                         size={{ xs: 12, sm: 6, md: 4 }}
                         sx={{
                           borderBottom: '1px solid',
                           borderColor: 'divider',
                         }}
                       >
-                        <GridStory item={item} read={readIds.has(item.id)} onRead={markRead} />
+                        {entry.mode === 'headline' ? (
+                          <ReadHeadline item={entry.item} variant="grid" />
+                        ) : (
+                          <GridStory item={entry.item} read={false} onRead={markRead} />
+                        )}
                       </Grid>
                     ))}
                   </Grid>

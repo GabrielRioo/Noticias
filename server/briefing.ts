@@ -23,11 +23,16 @@ function byRecency(items: NewsItem[]): NewsItem[] {
   );
 }
 
-function latestPerTopic(items: NewsItem[], excluded: ReadonlySet<string>): NewsItem[] {
+function withBriefing(items: readonly NewsItem[]): NewsItem[] {
+  return items.filter((item) => Boolean(item.briefing?.trim()));
+}
+
+/** Newest unread per topic; used to decide which clusters still need a summary. */
+function unreadEdition(items: NewsItem[], excluded: ReadonlySet<string>): NewsItem[] {
   const best = new Map<NewsTopic, NewsItem>();
 
-  for (const item of items) {
-    if (!item.briefing?.trim() || excluded.has(item.id)) {
+  for (const item of withBriefing(items)) {
+    if (excluded.has(item.id)) {
       continue;
     }
 
@@ -43,10 +48,7 @@ function latestPerTopic(items: NewsItem[], excluded: ReadonlySet<string>): NewsI
 function retainRecent(items: NewsItem[]): NewsItem[] {
   const grouped = new Map<NewsTopic, NewsItem[]>();
 
-  for (const item of items) {
-    if (!item.briefing?.trim()) {
-      continue;
-    }
+  for (const item of withBriefing(items)) {
     const bucket = grouped.get(item.topic) ?? [];
     bucket.push(item);
     grouped.set(item.topic, bucket);
@@ -89,6 +91,7 @@ function pickClustersToSummarize(
     }
 
     const current = editionByTopic.get(topic);
+    // No unread in this topic yet: always try to summarize something relevant.
     if (current && clusterTime(newest) <= publishedTime(current.publishedAt)) {
       continue;
     }
@@ -108,14 +111,14 @@ export async function refreshBriefing(
 
   const excluded = new Set(readIds);
   const cache = readCache();
-  const items = cache.items.filter((item) => Boolean(item.briefing?.trim()));
+  const items = withBriefing(cache.items);
   const known = new Set([
     ...items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
     ...cache.skippedIds,
   ]);
 
   const articles = await collectArticles();
-  const edition = latestPerTopic(items, excluded);
+  const edition = unreadEdition(items, excluded);
   const clusters = pickClustersToSummarize(clusterArticles(articles), known, edition);
   const skippedIds = [...cache.skippedIds];
 
@@ -138,10 +141,10 @@ export async function refreshBriefing(
     skippedIds: skippedIds.slice(-400),
   };
   writeCache(next);
-  return { items: latestPerTopic(next.items, excluded), updatedAt: next.updatedAt };
+  return { items: next.items, updatedAt: next.updatedAt };
 }
 
 export function listBriefing(): { items: NewsItem[]; updatedAt: string | null } {
   const cache = readCache();
-  return { items: latestPerTopic(cache.items, new Set()), updatedAt: cache.updatedAt };
+  return { items: withBriefing(cache.items), updatedAt: cache.updatedAt };
 }
