@@ -1,0 +1,11 @@
+{
+  "framework": "vite",
+  "functions": {
+    "api/news/search.ts": {
+      "maxDuration": 30
+    },
+    "api/news/refresh.ts": {
+      "maxDuration": 60
+    }
+  }
+}
