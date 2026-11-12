@@ -1,7 +1,7 @@
 import Parser from 'rss-parser';
-import type { SearchHit } from '../src/types/news.ts';
-import { FEEDS, type FeedConfig } from './feeds.ts';
-import { cleanArticleText } from './text.ts';
+import type { SearchHit } from '../src/types/news.js';
+import { FEEDS, type FeedConfig } from './feeds.js';
+import { cleanArticleText } from './text.js';
 
 const parser = new Parser({
   timeout: 15000,

@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { listBriefing, refreshBriefing } from './briefing.ts';
-import { loadEnvFile } from './env.ts';
-import { parseReadIds } from './readIds.ts';
-import { normalizeSearchQuery, searchNews } from './search.ts';
+import { listBriefing, refreshBriefing } from './briefing.js';
+import { loadEnvFile } from './env.js';
+import { parseReadIds } from './readIds.js';
+import { normalizeSearchQuery, searchNews } from './search.js';
 
 loadEnvFile();
 

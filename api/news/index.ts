@@ -1,5 +1,5 @@
-import { listBriefing } from '../../server/briefing.ts';
-import { loadEnvFile } from '../../server/env.ts';
+import { listBriefing } from '../../server/briefing.js';
+import { loadEnvFile } from '../../server/env.js';
 
 loadEnvFile();
 

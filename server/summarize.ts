@@ -1,8 +1,8 @@
-import { NEWS_TOPICS, type GlossaryTerm, type NewsItem, type NewsTopic } from '../src/types/news.ts';
-import { getGeminiConfig } from './env.ts';
-import { extractLeadNumbers, missingNumbers } from './text.ts';
-import type { ArticleCluster } from './cluster.ts';
-import { longestText } from './cluster.ts';
+import { NEWS_TOPICS, type GlossaryTerm, type NewsItem, type NewsTopic } from '../src/types/news.js';
+import { getGeminiConfig } from './env.js';
+import { extractLeadNumbers, missingNumbers } from './text.js';
+import type { ArticleCluster } from './cluster.js';
+import { longestText } from './cluster.js';
 
 type ModelSummary = {
   keep: boolean;

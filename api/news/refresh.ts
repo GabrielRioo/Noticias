@@ -1,6 +1,6 @@
-import { refreshBriefing } from '../../server/briefing.ts';
-import { loadEnvFile } from '../../server/env.ts';
-import { parseReadIds } from '../../server/readIds.ts';
+import { refreshBriefing } from '../../server/briefing.js';
+import { loadEnvFile } from '../../server/env.js';
+import { parseReadIds } from '../../server/readIds.js';
 
 loadEnvFile();
 

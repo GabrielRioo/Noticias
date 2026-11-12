@@ -1,4 +1,4 @@
-import type { NewsTopic } from '../src/types/news.ts';
+import type { NewsTopic } from '../src/types/news.js';
 
 export type FeedConfig = {
   id: string;

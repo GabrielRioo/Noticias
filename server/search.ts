@@ -2,8 +2,8 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
   SEARCH_QUERY_MIN_LENGTH,
   type SearchHit,
-} from '../src/types/news.ts';
-import { collectSearchArticles } from './rss.ts';
+} from '../src/types/news.js';
+import { collectSearchArticles } from './rss.js';
 
 export function normalizeSearchQuery(raw: unknown): string {
   if (typeof raw !== 'string') {

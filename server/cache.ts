@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { NewsItem } from '../src/types/news.ts';
+import type { NewsItem } from '../src/types/news.js';
 
 // Vercel can only write to /tmp, and that directory is not shared between instances.
 const CACHE_PATH = process.env.VERCEL

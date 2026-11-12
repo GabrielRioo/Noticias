@@ -1,5 +1,5 @@
-import type { RawArticle } from './rss.ts';
-import { titleSimilarity } from './text.ts';
+import type { RawArticle } from './rss.js';
+import { titleSimilarity } from './text.js';
 
 const WINDOW_MS = 36 * 60 * 60 * 1000;
 const SIMILARITY_THRESHOLD = 0.38;

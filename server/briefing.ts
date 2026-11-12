@@ -1,10 +1,10 @@
-import { readCache, writeCache } from './cache.ts';
-import { clusterArticles, type ArticleCluster } from './cluster.ts';
-import { getGeminiConfig } from './env.ts';
-import { FEEDS } from './feeds.ts';
-import { collectArticles } from './rss.ts';
-import { summarizeCluster } from './summarize.ts';
-import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.ts';
+import { readCache, writeCache } from './cache.js';
+import { clusterArticles, type ArticleCluster } from './cluster.js';
+import { getGeminiConfig } from './env.js';
+import { FEEDS } from './feeds.js';
+import { collectArticles } from './rss.js';
+import { summarizeCluster } from './summarize.js';
+import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.js';
 
 const KEPT_PER_TOPIC = 5;
 

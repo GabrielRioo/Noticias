@@ -1,5 +1,5 @@
-import { loadEnvFile } from '../../server/env.ts';
-import { normalizeSearchQuery, searchNews } from '../../server/search.ts';
+import { loadEnvFile } from '../../server/env.js';
+import { normalizeSearchQuery, searchNews } from '../../server/search.js';
 
 loadEnvFile();
 
