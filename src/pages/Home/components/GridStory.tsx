@@ -8,7 +8,7 @@ import { StoryMeta } from './StoryMeta';
 type GridStoryProps = {
   item: NewsItem;
   read: boolean;
-  onRead: (id: string) => void;
+  onRead: (item: NewsItem) => void;
 };
 
 export function GridStory({ item, read, onRead }: GridStoryProps) {

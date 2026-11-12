@@ -6,7 +6,7 @@ import type { NewsItem } from '../../../types/news';
 type StoryLinksProps = {
   item: NewsItem;
   read: boolean;
-  onRead: (id: string) => void;
+  onRead: (item: NewsItem) => void;
 };
 
 export function primarySource(item: NewsItem): { outlet: string; url: string } | undefined {
@@ -48,7 +48,7 @@ export function StoryLinks({ item, read, onRead }: StoryLinksProps) {
           ))}
         </Stack>
       ) : null}
-      <Button size="small" sx={{ px: 0, alignSelf: 'flex-start' }} onClick={() => onRead(item.id)} disabled={read}>
+      <Button size="small" sx={{ px: 0, alignSelf: 'flex-start' }} onClick={() => onRead(item)} disabled={read}>
         {read ? 'Lida' : 'Marcar como lida'}
       </Button>
     </Stack>

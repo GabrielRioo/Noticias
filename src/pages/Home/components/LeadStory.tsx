@@ -8,7 +8,7 @@ import { StoryMeta } from './StoryMeta';
 type LeadStoryProps = {
   item: NewsItem;
   read: boolean;
-  onRead: (id: string) => void;
+  onRead: (item: NewsItem) => void;
 };
 
 export function LeadStory({ item, read, onRead }: LeadStoryProps) {

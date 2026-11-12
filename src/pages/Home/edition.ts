@@ -1,6 +1,12 @@
 import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../../types/news';
+import {
+  isFreshRead,
+  READ_HEADLINE_MAX_AGE_MS,
+  snapshotToNewsItem,
+  type ReadHistory,
+} from './readHistory';
 
-export const READ_HEADLINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export { READ_HEADLINE_MAX_AGE_MS };
 
 export type EditionEntry = {
   item: NewsItem;
@@ -18,21 +24,15 @@ function byRecency(items: NewsItem[]): NewsItem[] {
   );
 }
 
-function isWithinReadWindow(item: NewsItem, now: number): boolean {
-  const published = publishedTime(item.publishedAt);
-  if (published <= 0) {
-    return false;
-  }
-  return now - published <= READ_HEADLINE_MAX_AGE_MS;
-}
-
 /**
- * One slot per topic: prefer newest unread (full story), else a recent read (headline only).
- * Guarantees a visible item whenever the cache still has something relevant.
+ * Per topic: newest unread as full story when available.
+ * Always keeps the last read as a headline when it was read within 1 week.
+ * If there is no unread, falls back to a recent item from the API cache.
  */
 export function pickEditionEntries(
   items: readonly NewsItem[],
   readIds: ReadonlySet<string>,
+  readHistory: ReadHistory,
   topic: NewsTopic | 'all',
   now = Date.now(),
 ): EditionEntry[] {
@@ -43,21 +43,30 @@ export function pickEditionEntries(
     const candidates = byRecency(
       items.filter((item) => item.topic === currentTopic && Boolean(item.briefing?.trim())),
     );
-    if (candidates.length === 0) {
-      continue;
-    }
-
     const unread = candidates.find((item) => !readIds.has(item.id));
+    const lastRead = readHistory[currentTopic];
+    const lastReadFresh = lastRead && isFreshRead(lastRead, now) ? lastRead : undefined;
+
     if (unread) {
       entries.push({ item: unread, mode: 'full' });
+      if (lastReadFresh && lastReadFresh.id !== unread.id) {
+        entries.push({ item: snapshotToNewsItem(lastReadFresh), mode: 'headline' });
+      }
       continue;
     }
 
-    const recentRead = candidates.find(
-      (item) => readIds.has(item.id) && isWithinReadWindow(item, now),
-    );
-    if (recentRead) {
-      entries.push({ item: recentRead, mode: 'headline' });
+    if (lastReadFresh) {
+      entries.push({ item: snapshotToNewsItem(lastReadFresh), mode: 'headline' });
+      continue;
+    }
+
+    // Keep the category visible with something relevant from cache (even a few days old).
+    const fallback = candidates[0];
+    if (fallback) {
+      entries.push({
+        item: fallback,
+        mode: readIds.has(fallback.id) ? 'headline' : 'full',
+      });
     }
   }
 

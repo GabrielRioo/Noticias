@@ -8,7 +8,7 @@ import { StoryMeta } from './StoryMeta';
 type SidebarStoryProps = {
   item: NewsItem;
   read: boolean;
-  onRead: (id: string) => void;
+  onRead: (item: NewsItem) => void;
 };
 
 export function SidebarStory({ item, read, onRead }: SidebarStoryProps) {

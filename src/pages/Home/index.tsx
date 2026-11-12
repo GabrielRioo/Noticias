@@ -26,6 +26,7 @@ export function HomePage() {
     error,
     refreshing,
     readIds,
+    readHistory,
     load,
     refresh,
     markRead,
@@ -38,15 +39,20 @@ export function HomePage() {
   } = useHome();
   const [topic, setTopic] = useState<NewsTopic | 'all'>('all');
   const edition = useMemo(
-    () => pickEditionEntries(items, readIds, topic),
-    [items, readIds, topic],
+    () => pickEditionEntries(items, readIds, readHistory, topic),
+    [items, readIds, readHistory, topic],
   );
-  const lead = edition[0];
-  const others = edition.slice(1);
+  const fullEntries = useMemo(() => edition.filter((entry) => entry.mode === 'full'), [edition]);
+  const readHeadlines = useMemo(
+    () => edition.filter((entry) => entry.mode === 'headline'),
+    [edition],
+  );
+  const lead = fullEntries[0];
+  const others = fullEntries.slice(1);
   const sidebar = topic === 'all' ? others.slice(0, 3) : [];
   const rest = topic === 'all' ? others.slice(3) : others;
-  const editionRead =
-    status === 'success' && items.length > 0 && edition.length === 0;
+  const showEdition = status === 'success' || status === 'empty';
+  const hasContent = edition.length > 0;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -106,87 +112,109 @@ export function HomePage() {
             </Alert>
           ) : null}
 
-          {searchStatus === 'idle' &&
-          (status === 'empty' || (status === 'success' && edition.length === 0)) ? (
+          {searchStatus === 'idle' && showEdition && !hasContent ? (
             <Box sx={{ py: 10, textAlign: 'center', maxWidth: 520, mx: 'auto' }}>
               <Typography variant="overline" color="primary">
                 Edição em branco
               </Typography>
               <Typography variant="h3" sx={{ mt: 1, mb: 1.5, fontSize: '2rem' }}>
-                {editionRead ? 'Nada recente para mostrar neste recorte.' : 'Ainda não há o que ler neste recorte.'}
+                {items.length > 0
+                  ? 'Nada recente para mostrar neste recorte.'
+                  : 'Ainda não há o que ler neste recorte.'}
               </Typography>
               <Typography color="text.secondary">
-                {editionRead
+                {items.length > 0
                   ? 'As lidas com mais de uma semana saem da capa. Atualize a edição para buscar algo novo em cada editoria.'
                   : 'Atualize a edição para puxar a notícia mais recente de cada editoria.'}
               </Typography>
             </Box>
           ) : null}
 
-          {searchStatus === 'idle' && status === 'success' && lead ? (
+          {searchStatus === 'idle' && showEdition && hasContent ? (
             <Box component="main" sx={{ pt: { xs: 3, md: 5 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                Palavras com sublinhado pontilhado têm uma explicação curta ao passar o mouse ou tocar.
-              </Typography>
-              <Grid container spacing={0} sx={{ alignItems: 'flex-start' }}>
-                <Grid size={{ xs: 12, md: sidebar.length > 0 ? 8 : 12 }}>
-                  {lead.mode === 'headline' ? (
-                    <ReadHeadline item={lead.item} variant="lead" />
-                  ) : (
-                    <LeadStory item={lead.item} read={false} onRead={markRead} />
-                  )}
-                </Grid>
-                {sidebar.length > 0 ? (
-                  <Grid
-                    size={{ xs: 12, md: 4 }}
-                    sx={{
-                      mt: { xs: 4, md: 0 },
-                      pl: { md: 4 },
-                      borderLeft: { md: '1px solid' },
-                      borderTop: { xs: '1px solid', md: 0 },
-                      borderColor: { xs: 'divider', md: 'divider' },
-                      pt: { xs: 3, md: 0 },
-                    }}
-                  >
-                    <Typography variant="overline" sx={{ display: 'block', mb: 1 }}>
-                      Também nesta edição
-                    </Typography>
-                    {sidebar.map((entry) =>
-                      entry.mode === 'headline' ? (
-                        <ReadHeadline key={entry.item.id} item={entry.item} variant="sidebar" />
-                      ) : (
-                        <SidebarStory
-                          key={entry.item.id}
-                          item={entry.item}
-                          read={false}
-                          onRead={markRead}
-                        />
-                      ),
-                    )}
+              {fullEntries.length > 0 ? (
+                <>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                    Palavras com sublinhado pontilhado têm uma explicação curta ao passar o mouse ou tocar.
+                  </Typography>
+                  <Grid container spacing={0} sx={{ alignItems: 'flex-start' }}>
+                    <Grid size={{ xs: 12, md: sidebar.length > 0 ? 8 : 12 }}>
+                      {lead ? <LeadStory item={lead.item} read={false} onRead={markRead} /> : null}
+                    </Grid>
+                    {sidebar.length > 0 ? (
+                      <Grid
+                        size={{ xs: 12, md: 4 }}
+                        sx={{
+                          mt: { xs: 4, md: 0 },
+                          pl: { md: 4 },
+                          borderLeft: { md: '1px solid' },
+                          borderTop: { xs: '1px solid', md: 0 },
+                          borderColor: { xs: 'divider', md: 'divider' },
+                          pt: { xs: 3, md: 0 },
+                        }}
+                      >
+                        <Typography variant="overline" sx={{ display: 'block', mb: 1 }}>
+                          Também nesta edição
+                        </Typography>
+                        {sidebar.map((entry) => (
+                          <SidebarStory
+                            key={entry.item.id}
+                            item={entry.item}
+                            read={false}
+                            onRead={markRead}
+                          />
+                        ))}
+                      </Grid>
+                    ) : null}
                   </Grid>
-                ) : null}
-              </Grid>
 
-              {rest.length > 0 ? (
-                <Box sx={{ mt: 5, pt: 4, borderTop: '3px double', borderColor: 'text.primary' }}>
-                  <Typography variant="overline" sx={{ display: 'block', mb: 3 }}>
-                    Outras editorias
+                  {rest.length > 0 ? (
+                    <Box sx={{ mt: 5, pt: 4, borderTop: '3px double', borderColor: 'text.primary' }}>
+                      <Typography variant="overline" sx={{ display: 'block', mb: 3 }}>
+                        Outras editorias
+                      </Typography>
+                      <Grid container spacing={0}>
+                        {rest.map((entry) => (
+                          <Grid
+                            key={entry.item.id}
+                            size={{ xs: 12, sm: 6, md: 4 }}
+                            sx={{
+                              borderBottom: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
+                            <GridStory item={entry.item} read={false} onRead={markRead} />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Box>
+                  ) : null}
+                </>
+              ) : null}
+
+              {readHeadlines.length > 0 ? (
+                <Box
+                  sx={{
+                    mt: fullEntries.length > 0 ? 5 : 0,
+                    pt: fullEntries.length > 0 ? 4 : 0,
+                    borderTop: fullEntries.length > 0 ? '1px solid' : 0,
+                    borderColor: 'divider',
+                  }}
+                >
+                  <Typography variant="overline" sx={{ display: 'block', mb: 2 }}>
+                    Últimas lidas
                   </Typography>
                   <Grid container spacing={0}>
-                    {rest.map((entry) => (
+                    {readHeadlines.map((entry) => (
                       <Grid
-                        key={entry.item.id}
+                        key={`read-${entry.item.topic}-${entry.item.id}`}
                         size={{ xs: 12, sm: 6, md: 4 }}
                         sx={{
                           borderBottom: '1px solid',
                           borderColor: 'divider',
                         }}
                       >
-                        {entry.mode === 'headline' ? (
-                          <ReadHeadline item={entry.item} variant="grid" />
-                        ) : (
-                          <GridStory item={entry.item} read={false} onRead={markRead} />
-                        )}
+                        <ReadHeadline item={entry.item} variant="grid" />
                       </Grid>
                     ))}
                   </Grid>

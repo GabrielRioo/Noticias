@@ -7,6 +7,12 @@ import {
   type NewsItem,
   type SearchHit,
 } from '../../../types/news';
+import {
+  hydrateReadHistory,
+  loadReadHistory,
+  rememberReadItem,
+  type ReadHistory,
+} from '../readHistory';
 
 const READ_KEY = 'briefing-read-ids';
 
@@ -53,6 +59,7 @@ export function useHome() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(readStoredIds);
+  const [readHistory, setReadHistory] = useState<ReadHistory>(loadReadHistory);
   const [searchQuery, setSearchQuery] = useState(readSearchParam);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchStatus, setSearchStatus] = useState<SearchStatus>(readSearchParam() ? 'loading' : 'idle');
@@ -63,6 +70,7 @@ export function useHome() {
     setItems(payload.items);
     setUpdatedAt(payload.updatedAt);
     setStatus(payload.items.length === 0 ? 'empty' : 'success');
+    setReadHistory((current) => hydrateReadHistory(payload.items, readStoredIds(), current));
   }, []);
 
   useEffect(() => {
@@ -184,13 +192,14 @@ export function useHome() {
     writeSearchParam('');
   }, []);
 
-  const markRead = useCallback((id: string) => {
+  const markRead = useCallback((item: NewsItem) => {
     setReadIds((current) => {
       const next = new Set(current);
-      next.add(id);
+      next.add(item.id);
       localStorage.setItem(READ_KEY, JSON.stringify([...next].slice(-200)));
       return next;
     });
+    setReadHistory((current) => rememberReadItem(item, current));
   }, []);
 
   return {
@@ -201,6 +210,7 @@ export function useHome() {
     error,
     refreshing,
     readIds,
+    readHistory,
     load,
     refresh,
     markRead,
