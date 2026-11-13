@@ -14,6 +14,7 @@ export type ReadSnapshot = {
   bullets: string[];
   whyItMatters: string;
   importance: number;
+  numbersUnverified: boolean;
   briefing?: string;
 };
 
@@ -58,6 +59,7 @@ function parseSnapshot(value: unknown): ReadSnapshot | null {
     bullets: Array.isArray(raw.bullets) ? raw.bullets.filter((item) => typeof item === 'string') : [],
     whyItMatters: typeof raw.whyItMatters === 'string' ? raw.whyItMatters : '',
     importance: typeof raw.importance === 'number' ? raw.importance : 0,
+    numbersUnverified: raw.numbersUnverified === true,
     briefing: typeof raw.briefing === 'string' ? raw.briefing : undefined,
   };
 }
@@ -105,6 +107,7 @@ export function snapshotFromItem(item: NewsItem, readAt = new Date().toISOString
     bullets: item.bullets,
     whyItMatters: item.whyItMatters,
     importance: item.importance,
+    numbersUnverified: item.numbersUnverified,
     briefing: item.briefing,
   };
 }
@@ -136,6 +139,7 @@ export function snapshotToNewsItem(snapshot: ReadSnapshot): NewsItem {
     bullets: snapshot.bullets,
     whyItMatters: snapshot.whyItMatters,
     importance: snapshot.importance,
+    numbersUnverified: snapshot.numbersUnverified,
     briefing: snapshot.briefing ?? ' ',
   };
 }
