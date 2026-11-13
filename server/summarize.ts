@@ -30,9 +30,9 @@ type ModelSummary = {
 
 const SYSTEM_PROMPT = `Briefing em português do Brasil, factual e denso.
 
-keep true só se importa para alguém bem informado (política, guerra, economia, ciência, tech, mundo). keep false para crime local, fofoca, esporte, trânsito e clima cotidiano.
+keep true só se importa para alguém bem informado (política, guerra, economia, ciência, tech, mundo, Bitcoin/BTC, FIIs da carteira). keep false para crime local, fofoca, esporte, trânsito e clima cotidiano.
 Não invente fatos. Preserve nomes, números, datas e consequências do texto.
-JSON somente: keep, title, briefing (2-3 parágrafos curtos separados por \\n\\n), bullets (4-6), whyItMatters, terms (0-5 {term, explanation}), topic (politica|conflitos|economia|tecnologia|ciencia|mundo), importance (1-5), ongoing.`;
+JSON somente: keep, title, briefing (2-3 parágrafos curtos separados por \\n\\n), bullets (4-6), whyItMatters, terms (0-5 {term, explanation}), topic (politica|conflitos|economia|tecnologia|ciencia|mundo|btc|fiis), importance (1-5), ongoing.`;
 
 function parseTerms(raw: unknown): GlossaryTerm[] {
   if (!Array.isArray(raw)) {

@@ -22,7 +22,7 @@ export type BriefingPayload = {
 
 const KEPT_PER_TOPIC = 8;
 /** Hard cap of Gemini calls per refresh (free tier ~15 RPM). */
-const MAX_AI_CALLS_PER_REFRESH = 6;
+const MAX_AI_CALLS_PER_REFRESH = 8;
 
 const CONFLICT_HINT =
   /guerra|conflito|gaza|ucr[aâ]nia|israel|hamas|otan|m[ií]ssil|ataque|hezbollah|ir[aã]|taiwan|ciss[aã]o|ocupa/i;

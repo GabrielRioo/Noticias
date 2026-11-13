@@ -8,4 +8,6 @@ export const TOPIC_LABELS: Record<NewsTopic | 'all', string> = {
   tecnologia: 'Tecnologia',
   ciencia: 'Ciência',
   mundo: 'Mundo',
+  btc: 'BTC',
+  fiis: 'FIIs',
 };

@@ -5,6 +5,8 @@ export const NEWS_TOPICS = [
   'tecnologia',
   'ciencia',
   'mundo',
+  'btc',
+  'fiis',
 ] as const;
 
 export type NewsTopic = (typeof NEWS_TOPICS)[number];

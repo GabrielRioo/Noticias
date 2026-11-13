@@ -9,6 +9,37 @@ export type FeedConfig = {
   opensEdition?: boolean;
 };
 
+/** Personal FII watchlist — news feeds match these tickers only. */
+export const PORTFOLIO_FIIS = [
+  'RECR11',
+  'KNIP11',
+  'URPR11',
+  'XPML11',
+  'HGRE11',
+  'BTLG11',
+  'MCRE11',
+  'MXRF11',
+  'VGIA11',
+  'VGHF11',
+  'BTHF11',
+  'CPTS11',
+  'VISC11',
+  'GARE11',
+  'BRCO11',
+  'GGRC11',
+  'RBRR11',
+] as const;
+
+function googleNewsSearch(query: string): string {
+  const params = new URLSearchParams({
+    q: query,
+    hl: 'pt-BR',
+    gl: 'BR',
+    ceid: 'BR:pt-419',
+  });
+  return `https://news.google.com/rss/search?${params.toString()}`;
+}
+
 export const FEEDS: FeedConfig[] = [
   {
     id: 'g1-politica',
@@ -155,7 +186,45 @@ export const FEEDS: FeedConfig[] = [
     topic: 'economia',
     minTextLength: 80,
     urls: [
-      'https://news.google.com/rss/search?q=tarifas+OR+sanções+OR+retaliação+OR+%22guerra+comercial%22+EUA+when:90d&hl=pt-BR&gl=BR&ceid=BR:pt-419',
+      googleNewsSearch('tarifas OR sanções OR retaliação OR "guerra comercial" EUA when:90d'),
+    ],
+  },
+  {
+    id: 'dossier-btc',
+    outlet: 'Google Notícias',
+    topic: 'btc',
+    minTextLength: 80,
+    urls: [
+      googleNewsSearch('Bitcoin OR BTC OR "preço do bitcoin" OR ETF bitcoin when:14d'),
+    ],
+  },
+  {
+    id: 'dossier-btc-mercado',
+    outlet: 'Google Notícias',
+    topic: 'btc',
+    minTextLength: 80,
+    urls: [
+      googleNewsSearch('Bitcoin (halving OR mineração OR "reserva estratégica" OR criptomoeda) when:30d'),
+    ],
+  },
+  {
+    id: 'dossier-fiis',
+    outlet: 'Google Notícias',
+    topic: 'fiis',
+    minTextLength: 60,
+    urls: [
+      googleNewsSearch(`${PORTFOLIO_FIIS.join(' OR ')} when:30d`),
+    ],
+  },
+  {
+    id: 'dossier-fiis-renda',
+    outlet: 'Google Notícias',
+    topic: 'fiis',
+    minTextLength: 60,
+    urls: [
+      googleNewsSearch(
+        `(${PORTFOLIO_FIIS.join(' OR ')}) (dividendo OR rendimento OR cotação OR FII) when:45d`,
+      ),
     ],
   },
 ];
