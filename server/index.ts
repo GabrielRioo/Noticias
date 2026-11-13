@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { listBriefing, refreshBriefing } from './briefing.js';
 import { loadEnvFile } from './env.js';
 import { parseReadIds } from './readIds.js';
+import { parseSeedItems } from './seedItems.js';
 import { normalizeSearchQuery, searchNews } from './search.js';
 
 loadEnvFile();
@@ -16,7 +17,7 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 }
 
-const MAX_BODY_BYTES = 32_768;
+const MAX_BODY_BYTES = 512_000;
 
 function readUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? '/', `http://${HOST}:${PORT}`);
@@ -75,13 +76,18 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
 
   if (request.method === 'POST' && url.pathname === '/api/news/refresh') {
     try {
-      const readIds = parseReadIds(await readJsonBody(request));
-      const payload = await refreshBriefing(readIds);
+      const body = await readJsonBody(request);
+      const readIds = parseReadIds(body);
+      const seedItems = parseSeedItems(body);
+      const payload = await refreshBriefing(readIds, seedItems);
       sendJson(response, 200, payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao atualizar o briefing';
       const invalidBody =
-        message === 'readIds inválido' || message === 'JSON inválido' || message === 'Corpo grande demais';
+        message === 'readIds inválido' ||
+        message === 'items inválido' ||
+        message === 'JSON inválido' ||
+        message === 'Corpo grande demais';
       sendJson(response, invalidBody ? 400 : 500, { error: message });
     }
     return;

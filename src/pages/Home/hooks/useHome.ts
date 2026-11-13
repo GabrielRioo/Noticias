@@ -8,6 +8,11 @@ import {
   type SearchHit,
 } from '../../../types/news';
 import {
+  loadEditionCache,
+  mergeEditionItems,
+  saveEditionCache,
+} from '../editionCache';
+import {
   hydrateReadHistory,
   loadReadHistory,
   rememberReadItem,
@@ -52,10 +57,19 @@ function readStoredIds(): Set<string> {
   }
 }
 
+function initialEdition(): { items: NewsItem[]; updatedAt: string | null; status: Status } {
+  const cached = loadEditionCache();
+  if (!cached) {
+    return { items: [], updatedAt: null, status: 'loading' };
+  }
+  return { items: cached.items, updatedAt: cached.updatedAt, status: 'success' };
+}
+
 export function useHome() {
-  const [items, setItems] = useState<NewsItem[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>('loading');
+  const initial = initialEdition();
+  const [items, setItems] = useState<NewsItem[]>(initial.items);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(initial.updatedAt);
+  const [status, setStatus] = useState<Status>(initial.status);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(readStoredIds);
@@ -65,26 +79,43 @@ export function useHome() {
   const [searchStatus, setSearchStatus] = useState<SearchStatus>(readSearchParam() ? 'loading' : 'idle');
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchRequest = useRef(0);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
-  const applyPayload = useCallback((payload: { items: NewsItem[]; updatedAt: string | null }) => {
-    setItems(payload.items);
-    setUpdatedAt(payload.updatedAt);
-    setStatus(payload.items.length === 0 ? 'empty' : 'success');
-    setReadHistory((current) => hydrateReadHistory(payload.items, readStoredIds(), current));
-  }, []);
+  const applyPayload = useCallback(
+    (payload: { items: NewsItem[]; updatedAt: string | null }, mergeLocal: boolean) => {
+      const nextItems = mergeLocal
+        ? mergeEditionItems(itemsRef.current, payload.items)
+        : mergeEditionItems([], payload.items);
+      const nextUpdatedAt = payload.updatedAt ?? (nextItems.length > 0 ? new Date().toISOString() : null);
+      setItems(nextItems);
+      setUpdatedAt(nextUpdatedAt);
+      setStatus(nextItems.length === 0 ? 'empty' : 'success');
+      saveEditionCache(nextItems, nextUpdatedAt);
+      setReadHistory((current) => hydrateReadHistory(nextItems, readStoredIds(), current));
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadWithRetry(): Promise<void> {
-      setStatus('loading');
+      if (itemsRef.current.length === 0) {
+        setStatus('loading');
+      }
       setError(null);
       let lastError: unknown;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         try {
           const payload = await listNews();
           if (!cancelled) {
-            applyPayload(payload);
+            // Keep local edition when the server cache is empty (common on Vercel /tmp).
+            if (payload.items.length === 0 && itemsRef.current.length > 0) {
+              setStatus('success');
+              return;
+            }
+            applyPayload(payload, true);
           }
           return;
         } catch (caught) {
@@ -93,6 +124,10 @@ export function useHome() {
         }
       }
       if (!cancelled) {
+        if (itemsRef.current.length > 0) {
+          setStatus('success');
+          return;
+        }
         setError(lastError instanceof Error ? lastError.message : 'Falha ao carregar');
         setStatus('error');
       }
@@ -160,11 +195,22 @@ export function useHome() {
   }, [runSearch]);
 
   const load = useCallback(async () => {
-    setStatus('loading');
+    if (itemsRef.current.length === 0) {
+      setStatus('loading');
+    }
     setError(null);
     try {
-      applyPayload(await listNews());
+      const payload = await listNews();
+      if (payload.items.length === 0 && itemsRef.current.length > 0) {
+        setStatus('success');
+        return;
+      }
+      applyPayload(payload, true);
     } catch (caught) {
+      if (itemsRef.current.length > 0) {
+        setStatus('success');
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Falha ao carregar');
       setStatus('error');
     }
@@ -173,15 +219,18 @@ export function useHome() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
+    // Snapshot current edition before the request so a failed refresh still keeps it.
+    saveEditionCache(itemsRef.current, updatedAt);
     try {
-      applyPayload(await refreshNews([...readIds].slice(-200)));
+      const payload = await refreshNews([...readIds].slice(-200), itemsRef.current.slice(0, 48));
+      applyPayload(payload, true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Falha ao atualizar');
-      setStatus((current) => (items.length === 0 ? 'error' : current));
+      setStatus((current) => (itemsRef.current.length === 0 ? 'error' : current));
     } finally {
       setRefreshing(false);
     }
-  }, [applyPayload, items.length, readIds]);
+  }, [applyPayload, readIds, updatedAt]);
 
   const clearSearch = useCallback(() => {
     searchRequest.current += 1;

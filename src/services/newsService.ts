@@ -29,11 +29,14 @@ export async function searchNews(query: string): Promise<SearchResponse> {
   return parseJson<SearchResponse>(response);
 }
 
-export async function refreshNews(readIds: readonly string[]): Promise<NewsListResponse> {
+export async function refreshNews(
+  readIds: readonly string[],
+  items: readonly NewsItem[] = [],
+): Promise<NewsListResponse> {
   const response = await fetch('/api/news/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ readIds }),
+    body: JSON.stringify({ readIds, items }),
   });
   return parseJson<NewsListResponse>(response);
 }

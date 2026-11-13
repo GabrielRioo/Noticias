@@ -240,8 +240,20 @@ async function fillTopics(
   }
 }
 
+function mergeSeed(cacheItems: readonly NewsItem[], seedItems: readonly NewsItem[]): NewsItem[] {
+  const byId = new Map<string, NewsItem>();
+  for (const item of withBriefing(seedItems)) {
+    byId.set(item.id, item);
+  }
+  for (const item of withBriefing(cacheItems)) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()];
+}
+
 export async function refreshBriefing(
   readIds: readonly string[] = [],
+  seedItems: readonly NewsItem[] = [],
 ): Promise<{ items: NewsItem[]; updatedAt: string }> {
   if (!getGeminiConfig().apiKey) {
     throw new Error('Coloque GEMINI_API_KEY no arquivo .env na raiz do projeto.');
@@ -249,9 +261,9 @@ export async function refreshBriefing(
 
   const excluded = new Set(readIds);
   const cache = readCache();
-  const items = withBriefing(cache.items);
-  // Do not block empty-topic refill with old skippedIds — only avoid re-summarizing
-  // stories already kept in cache.
+  // Client localStorage seeds the ephemeral Vercel cache so reload/refresh
+  // does not force Gemini to rebuild the whole edition from scratch.
+  const items = mergeSeed(cache.items, seedItems);
   const known = new Set(
     items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
   );
