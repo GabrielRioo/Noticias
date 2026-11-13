@@ -5,6 +5,17 @@ import type { ArticleCluster } from './cluster.js';
 import { heuristicScore, longestText } from './cluster.js';
 import { enqueueGemini } from './geminiQueue.js';
 
+export class GeminiUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GeminiUnavailableError';
+  }
+}
+
+export function isGeminiUnavailableError(error: unknown): boolean {
+  return error instanceof GeminiUnavailableError;
+}
+
 type ModelSummary = {
   keep: boolean;
   title: string;
@@ -117,7 +128,20 @@ async function callGeminiOnce(prompt: string): Promise<string> {
   });
 
   if (!response.ok) {
-    await response.text();
+    const body = await response.text().catch(() => '');
+    if (
+      response.status === 429 ||
+      /RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(body)
+    ) {
+      throw new GeminiUnavailableError(
+        `Cota do Gemini esgotada (${response.status})`,
+      );
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new GeminiUnavailableError(
+        `Gemini recusou a chave (${response.status})`,
+      );
+    }
     throw new Error(`Gemini recusou a chamada (${response.status})`);
   }
 
@@ -209,7 +233,8 @@ export function draftFromCluster(cluster: ArticleCluster, topic: NewsTopic): New
     title: article.title,
     briefing,
     bullets,
-    whyItMatters: 'Versão rápida a partir do feed para não deixar a editoria vazia. Confira a matéria original.',
+    whyItMatters:
+      'Texto do feed, sem resumo da IA. Confira a matéria original para o contexto completo.',
     topic,
     importance: Math.min(5, Math.max(1, heuristicScore(article))),
     publishedAt: article.publishedAt,

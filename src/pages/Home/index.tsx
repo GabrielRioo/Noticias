@@ -22,6 +22,7 @@ export function HomePage() {
     topics,
     items,
     updatedAt,
+    withoutAi,
     status,
     error,
     refreshing,
@@ -109,6 +110,13 @@ export function HomePage() {
               }
             >
               {error}
+            </Alert>
+          ) : null}
+
+          {searchStatus === 'idle' && showEdition && withoutAi ? (
+            <Alert severity="warning" sx={{ mt: 3, mb: 1 }}>
+              Esta edição veio sem a IA do Gemini (cota esgotada ou chave indisponível). Os textos
+              saem direto dos feeds — confira sempre a matéria original.
             </Alert>
           ) : null}
 
@@ -238,7 +246,9 @@ export function HomePage() {
           >
             <Typography variant="caption" color="text.secondary">
               {searchStatus === 'idle'
-                ? 'Resumo gerado a partir de feeds oficiais. Sempre confira a matéria original.'
+                ? withoutAi
+                  ? 'Edição montada só com feeds (sem IA). Sempre confira a matéria original.'
+                  : 'Resumo gerado a partir de feeds oficiais. Sempre confira a matéria original.'
                 : 'Manchetes do Google Notícias. Sempre confira a matéria original.'}
             </Typography>
             <Typography variant="caption" color="text.secondary">

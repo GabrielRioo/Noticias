@@ -11,12 +11,14 @@ export type CacheFile = {
   updatedAt: string | null;
   items: NewsItem[];
   skippedIds: string[];
+  withoutAi: boolean;
 };
 
 const emptyCache = (): CacheFile => ({
   updatedAt: null,
   items: [],
   skippedIds: [],
+  withoutAi: false,
 });
 
 export function readCache(): CacheFile {
@@ -30,6 +32,7 @@ export function readCache(): CacheFile {
       updatedAt: parsed.updatedAt ?? null,
       items: parsed.items ?? [],
       skippedIds: parsed.skippedIds ?? [],
+      withoutAi: parsed.withoutAi === true,
     };
   } catch {
     return emptyCache();

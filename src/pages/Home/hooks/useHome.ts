@@ -57,18 +57,29 @@ function readStoredIds(): Set<string> {
   }
 }
 
-function initialEdition(): { items: NewsItem[]; updatedAt: string | null; status: Status } {
+function initialEdition(): {
+  items: NewsItem[];
+  updatedAt: string | null;
+  withoutAi: boolean;
+  status: Status;
+} {
   const cached = loadEditionCache();
   if (!cached) {
-    return { items: [], updatedAt: null, status: 'loading' };
+    return { items: [], updatedAt: null, withoutAi: false, status: 'loading' };
   }
-  return { items: cached.items, updatedAt: cached.updatedAt, status: 'success' };
+  return {
+    items: cached.items,
+    updatedAt: cached.updatedAt,
+    withoutAi: cached.withoutAi,
+    status: 'success',
+  };
 }
 
 export function useHome() {
   const initial = initialEdition();
   const [items, setItems] = useState<NewsItem[]>(initial.items);
   const [updatedAt, setUpdatedAt] = useState<string | null>(initial.updatedAt);
+  const [withoutAi, setWithoutAi] = useState(initial.withoutAi);
   const [status, setStatus] = useState<Status>(initial.status);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,15 +94,20 @@ export function useHome() {
   itemsRef.current = items;
 
   const applyPayload = useCallback(
-    (payload: { items: NewsItem[]; updatedAt: string | null }, mergeLocal: boolean) => {
+    (
+      payload: { items: NewsItem[]; updatedAt: string | null; withoutAi?: boolean },
+      mergeLocal: boolean,
+    ) => {
       const nextItems = mergeLocal
         ? mergeEditionItems(itemsRef.current, payload.items)
         : mergeEditionItems([], payload.items);
       const nextUpdatedAt = payload.updatedAt ?? (nextItems.length > 0 ? new Date().toISOString() : null);
+      const nextWithoutAi = payload.withoutAi === true;
       setItems(nextItems);
       setUpdatedAt(nextUpdatedAt);
+      setWithoutAi(nextWithoutAi);
       setStatus(nextItems.length === 0 ? 'empty' : 'success');
-      saveEditionCache(nextItems, nextUpdatedAt);
+      saveEditionCache(nextItems, nextUpdatedAt, nextWithoutAi);
       setReadHistory((current) => hydrateReadHistory(nextItems, readStoredIds(), current));
     },
     [],
@@ -220,7 +236,7 @@ export function useHome() {
     setRefreshing(true);
     setError(null);
     // Snapshot current edition before the request so a failed refresh still keeps it.
-    saveEditionCache(itemsRef.current, updatedAt);
+    saveEditionCache(itemsRef.current, updatedAt, withoutAi);
     try {
       const payload = await refreshNews([...readIds].slice(-200), itemsRef.current.slice(0, 48));
       applyPayload(payload, true);
@@ -230,7 +246,7 @@ export function useHome() {
     } finally {
       setRefreshing(false);
     }
-  }, [applyPayload, readIds, updatedAt]);
+  }, [applyPayload, readIds, updatedAt, withoutAi]);
 
   const clearSearch = useCallback(() => {
     searchRequest.current += 1;
@@ -255,6 +271,7 @@ export function useHome() {
     topics: NEWS_TOPICS,
     items,
     updatedAt,
+    withoutAi,
     status,
     error,
     refreshing,

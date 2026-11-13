@@ -7,8 +7,18 @@ import {
 import { getGeminiConfig } from './env.js';
 import { FEEDS } from './feeds.js';
 import { collectArticles } from './rss.js';
-import { draftFromCluster, summarizeCluster } from './summarize.js';
+import {
+  draftFromCluster,
+  isGeminiUnavailableError,
+  summarizeCluster,
+} from './summarize.js';
 import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.js';
+
+export type BriefingPayload = {
+  items: NewsItem[];
+  updatedAt: string | null;
+  withoutAi: boolean;
+};
 
 const KEPT_PER_TOPIC = 8;
 /** Hard cap of Gemini calls per refresh (free tier ~15 RPM). */
@@ -163,6 +173,7 @@ function draftTopic(
 /**
  * Minimum AI: at most one Gemini call per topic that lacks an unread item,
  * never in parallel, never more than MAX_AI_CALLS_PER_REFRESH. Draft fills the rest.
+ * When Gemini is unavailable (no key / quota), every gap is filled from RSS only.
  */
 async function fillTopics(
   clusters: ArticleCluster[],
@@ -170,15 +181,17 @@ async function fillTopics(
   known: Set<string>,
   excluded: ReadonlySet<string>,
   skippedIds: string[],
-): Promise<void> {
+  aiDisabled: boolean,
+): Promise<boolean> {
   let aiCalls = 0;
+  let withoutAi = aiDisabled;
 
   for (const topic of NEWS_TOPICS) {
     if (bestUnreadForTopic(items, topic, excluded)) {
       continue;
     }
 
-    if (aiCalls >= MAX_AI_CALLS_PER_REFRESH) {
+    if (withoutAi || aiCalls >= MAX_AI_CALLS_PER_REFRESH) {
       draftTopic(clusters, items, known, topic);
       continue;
     }
@@ -201,12 +214,19 @@ async function fillTopics(
       skippedIds.push(...candidate.articles.map((article) => article.id));
     } catch (error) {
       console.warn('Falha ao resumir cluster', candidate.id, error);
+      if (isGeminiUnavailableError(error)) {
+        withoutAi = true;
+        items.push(draftFromCluster(candidate, topic));
+        continue;
+      }
       skippedIds.push(...candidate.articles.map((article) => article.id));
     }
 
     // One AI miss is enough — fall back to RSS draft instead of burning more RPM.
     draftTopic(clusters, items, known, topic);
   }
+
+  return withoutAi;
 }
 
 function mergeSeed(cacheItems: readonly NewsItem[], seedItems: readonly NewsItem[]): NewsItem[] {
@@ -223,9 +243,10 @@ function mergeSeed(cacheItems: readonly NewsItem[], seedItems: readonly NewsItem
 export async function refreshBriefing(
   readIds: readonly string[] = [],
   seedItems: readonly NewsItem[] = [],
-): Promise<{ items: NewsItem[]; updatedAt: string }> {
-  if (!getGeminiConfig().apiKey) {
-    throw new Error('Coloque GEMINI_API_KEY no arquivo .env na raiz do projeto.');
+): Promise<BriefingPayload> {
+  const aiDisabled = !getGeminiConfig().apiKey;
+  if (aiDisabled) {
+    console.warn('GEMINI_API_KEY ausente — fechando edição só com feeds RSS.');
   }
 
   const excluded = new Set(readIds);
@@ -239,12 +260,20 @@ export async function refreshBriefing(
   const clusters = clusterArticles(articles);
   const skippedIds = [...cache.skippedIds];
 
-  await fillTopics(clusters, items, known, excluded, skippedIds);
+  const withoutAi = await fillTopics(
+    clusters,
+    items,
+    known,
+    excluded,
+    skippedIds,
+    aiDisabled,
+  );
 
   const next = {
     updatedAt: new Date().toISOString(),
     items: retainRecent(items),
     skippedIds: skippedIds.slice(-400),
+    withoutAi,
   };
   writeCache(next);
 
@@ -266,10 +295,14 @@ export async function refreshBriefing(
     byId.set(item.id, item);
   }
 
-  return { items: [...byId.values()], updatedAt: next.updatedAt };
+  return { items: [...byId.values()], updatedAt: next.updatedAt, withoutAi };
 }
 
-export function listBriefing(): { items: NewsItem[]; updatedAt: string | null } {
+export function listBriefing(): BriefingPayload {
   const cache = readCache();
-  return { items: withBriefing(cache.items), updatedAt: cache.updatedAt };
+  return {
+    items: withBriefing(cache.items),
+    updatedAt: cache.updatedAt,
+    withoutAi: cache.withoutAi,
+  };
 }

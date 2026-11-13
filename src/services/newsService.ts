@@ -3,6 +3,7 @@ import type { NewsItem, SearchHit } from '../types/news';
 export type NewsListResponse = {
   items: NewsItem[];
   updatedAt: string | null;
+  withoutAi?: boolean;
 };
 
 async function parseJson<T>(response: Response): Promise<T> {

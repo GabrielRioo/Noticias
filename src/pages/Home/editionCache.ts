@@ -7,6 +7,7 @@ const MAX_TOTAL_ITEMS = NEWS_TOPICS.length * MAX_ITEMS_PER_TOPIC;
 export type EditionCache = {
   updatedAt: string | null;
   items: NewsItem[];
+  withoutAi: boolean;
 };
 
 function publishedTime(value: string): number {
@@ -106,16 +107,22 @@ export function loadEditionCache(): EditionCache | null {
     return {
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
       items,
+      withoutAi: parsed.withoutAi === true,
     };
   } catch {
     return null;
   }
 }
 
-export function saveEditionCache(items: readonly NewsItem[], updatedAt: string | null): void {
+export function saveEditionCache(
+  items: readonly NewsItem[],
+  updatedAt: string | null,
+  withoutAi = false,
+): void {
   const payload: EditionCache = {
     updatedAt,
     items: retainEditionItems(items.filter(isNewsItem)),
+    withoutAi,
   };
   localStorage.setItem(EDITION_CACHE_KEY, JSON.stringify(payload));
 }
