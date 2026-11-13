@@ -11,8 +11,8 @@ import { draftFromCluster, summarizeCluster } from './summarize.js';
 import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.js';
 
 const KEPT_PER_TOPIC = 8;
-/** How many RSS candidates to try with Gemini per empty topic. */
-const FILL_ATTEMPTS_PER_TOPIC = 4;
+/** Hard cap of Gemini calls per refresh (free tier ~15 RPM). */
+const MAX_AI_CALLS_PER_REFRESH = 6;
 
 const CONFLICT_HINT =
   /guerra|conflito|gaza|ucr[aâ]nia|israel|hamas|otan|m[ií]ssil|ataque|hezbollah|ir[aã]|taiwan|ciss[aã]o|ocupa/i;
@@ -112,7 +112,6 @@ function candidatesForTopic(
   );
 }
 
-/** Includes already-seen clusters so an empty topic can still get a draft fallback. */
 function anyCandidatesForTopic(
   clusters: readonly ArticleCluster[],
   topic: NewsTopic,
@@ -139,9 +138,31 @@ function markClusterKnown(cluster: ArticleCluster, known: Set<string>): void {
   }
 }
 
+function draftTopic(
+  clusters: ArticleCluster[],
+  items: NewsItem[],
+  known: Set<string>,
+  topic: NewsTopic,
+): void {
+  if (hasTopicItem(items, topic)) {
+    return;
+  }
+
+  const occupied = new Set(items.map((item) => item.id));
+  const [fallback] = anyCandidatesForTopic(clusters, topic, occupied);
+  if (!fallback) {
+    console.warn(`Sem RSS utilizável para preencher a editoria ${topic}`);
+    return;
+  }
+
+  const drafted = draftFromCluster(fallback, topic);
+  items.push(drafted);
+  markClusterKnown(fallback, known);
+}
+
 /**
- * For every topic without an unread item, try candidates in relevance order until one sticks.
- * Ends with a hard RSS draft so no topic stays blank when the feed still has articles.
+ * Minimum AI: at most one Gemini call per topic that lacks an unread item,
+ * never in parallel, never more than MAX_AI_CALLS_PER_REFRESH. Draft fills the rest.
  */
 async function fillTopics(
   clusters: ArticleCluster[],
@@ -150,93 +171,41 @@ async function fillTopics(
   excluded: ReadonlySet<string>,
   skippedIds: string[],
 ): Promise<void> {
-  const summarizeOne = async (
-    cluster: ArticleCluster,
-    topic: NewsTopic,
-  ): Promise<NewsItem | null> => {
-    markClusterKnown(cluster, known);
-    try {
-      const summarized = await summarizeCluster(cluster, topic);
-      if (summarized) {
-        items.push(summarized);
-        return summarized;
-      }
-      skippedIds.push(...cluster.articles.map((article) => article.id));
-    } catch (error) {
-      console.warn('Falha ao resumir cluster', cluster.id, error);
-      skippedIds.push(...cluster.articles.map((article) => article.id));
-    }
-    return null;
-  };
+  let aiCalls = 0;
 
-  // Wave 1: fill empty topics in parallel (one best candidate each).
-  const emptyTopics = NEWS_TOPICS.filter((topic) => !bestUnreadForTopic(items, topic, excluded));
-  await Promise.all(
-    emptyTopics.map(async (topic) => {
-      const [first] = candidatesForTopic(clusters, topic, known);
-      if (!first) {
-        return;
-      }
-      await summarizeOne(first, topic);
-    }),
-  );
-
-  // Wave 2: topics still empty — try next candidates sequentially.
   for (const topic of NEWS_TOPICS) {
     if (bestUnreadForTopic(items, topic, excluded)) {
       continue;
     }
 
-    const remaining = candidatesForTopic(clusters, topic, known).slice(0, FILL_ATTEMPTS_PER_TOPIC);
-    for (const cluster of remaining) {
-      const summarized = await summarizeOne(cluster, topic);
+    if (aiCalls >= MAX_AI_CALLS_PER_REFRESH) {
+      draftTopic(clusters, items, known, topic);
+      continue;
+    }
+
+    const [candidate] = candidatesForTopic(clusters, topic, known);
+    if (!candidate) {
+      draftTopic(clusters, items, known, topic);
+      continue;
+    }
+
+    markClusterKnown(candidate, known);
+    aiCalls += 1;
+
+    try {
+      const summarized = await summarizeCluster(candidate, topic);
       if (summarized) {
-        break;
+        items.push(summarized);
+        continue;
       }
-    }
-  }
-
-  // Wave 3: upgrade topics that already have unread when a newer story appears.
-  await Promise.all(
-    NEWS_TOPICS.map(async (topic) => {
-      const current = bestUnreadForTopic(items, topic, excluded);
-      if (!current) {
-        return;
-      }
-
-      const [better] = candidatesForTopic(clusters, topic, known);
-      if (!better) {
-        return;
-      }
-
-      const betterTime = Math.max(
-        ...better.articles.map((article) => publishedTime(article.publishedAt)),
-      );
-      if (betterTime <= publishedTime(current.publishedAt)) {
-        return;
-      }
-
-      await summarizeOne(better, topic);
-    }),
-  );
-
-  // Wave 4: hard guarantee — if a topic still has zero items, draft from RSS.
-  const occupied = new Set(items.map((item) => item.id));
-  for (const topic of NEWS_TOPICS) {
-    if (hasTopicItem(items, topic)) {
-      continue;
+      skippedIds.push(...candidate.articles.map((article) => article.id));
+    } catch (error) {
+      console.warn('Falha ao resumir cluster', candidate.id, error);
+      skippedIds.push(...candidate.articles.map((article) => article.id));
     }
 
-    const [fallback] = anyCandidatesForTopic(clusters, topic, occupied);
-    if (!fallback) {
-      console.warn(`Sem RSS utilizável para preencher a editoria ${topic}`);
-      continue;
-    }
-
-    const drafted = draftFromCluster(fallback, topic);
-    items.push(drafted);
-    occupied.add(drafted.id);
-    markClusterKnown(fallback, known);
+    // One AI miss is enough — fall back to RSS draft instead of burning more RPM.
+    draftTopic(clusters, items, known, topic);
   }
 }
 
@@ -261,8 +230,6 @@ export async function refreshBriefing(
 
   const excluded = new Set(readIds);
   const cache = readCache();
-  // Client localStorage seeds the ephemeral Vercel cache so reload/refresh
-  // does not force Gemini to rebuild the whole edition from scratch.
   const items = mergeSeed(cache.items, seedItems);
   const known = new Set(
     items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
@@ -281,8 +248,6 @@ export async function refreshBriefing(
   };
   writeCache(next);
 
-  // Always expose at least one item per topic when available
-  // (unread preferred; otherwise the best retained story).
   const edition: NewsItem[] = [];
   for (const topic of NEWS_TOPICS) {
     const unread = bestUnreadForTopic(next.items, topic, excluded);

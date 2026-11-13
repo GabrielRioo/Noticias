@@ -3,6 +3,7 @@ import { getGeminiConfig } from './env.js';
 import { extractLeadNumbers, missingNumbers } from './text.js';
 import type { ArticleCluster } from './cluster.js';
 import { heuristicScore, longestText } from './cluster.js';
+import { enqueueGemini } from './geminiQueue.js';
 
 type ModelSummary = {
   keep: boolean;
@@ -16,26 +17,11 @@ type ModelSummary = {
   ongoing: boolean;
 };
 
-const SYSTEM_PROMPT = `Você escreve um briefing denso, em português do Brasil, para alguém que quer ficar por dentro da notícia sem abrir o site — mas ainda precisa de fatos, não de telegrama.
+const SYSTEM_PROMPT = `Briefing em português do Brasil, factual e denso.
 
-keep é true se uma pessoa bem informada precisaria saber daquilo — mesmo que a matéria tenha semanas ou meses. Guerra em curso, conflito dos EUA, sanção, tarifa, retaliação comercial, ocupação e crise diplomática entram, ainda que não sejam “de hoje”.
-keep é false para crime comum, homicídio local, término, briga de famoso, fofoca, polêmica de rede, esporte, bairro, trânsito, clima cotidiano e chamada de telejornal, salvo consequência pública clara.
-
-Regras:
-- não invente fato, número, nome, data, lugar, citação ou causa
-- preserve quem decidiu, o que mudou, quando, onde, por quê, números e o que vem depois, se isso estiver no texto
-- ignore WhatsApp, leia mais, legendas e anexos repetidos
-- se o texto for curto demais, keep false
-- título direto, sem clickbait
-- briefing: 2 a 4 parágrafos curtos, separados por \\n\\n, cobrindo contexto, o fato, reação e consequência. Não corte o que muda o sentido.
-- bullets: 5 a 8 itens factuais (nomes, números, prazos, órgãos)
-- whyItMatters: uma ou duas frases
-- topic: politica, conflitos, economia, tecnologia, ciencia ou mundo
-- importance: 1 a 5
-- ongoing: true se o fato ainda está em curso (guerra, sanção, tarifa, retaliação, cerco diplomático), mesmo com matéria mais antiga
-- terms: 3 a 8 itens { term, explanation }. Só palavras ou expressões do próprio texto que um leitor leigo pode não conhecer (órgão, sigla, partido, indicador, tecnologia). Explicação em uma frase, em português, sem inventar. Não explique palavras óbvias.
-
-Responda só JSON com keep, title, briefing, bullets, whyItMatters, terms, topic, importance, ongoing.`;
+keep true só se importa para alguém bem informado (política, guerra, economia, ciência, tech, mundo). keep false para crime local, fofoca, esporte, trânsito e clima cotidiano.
+Não invente fatos. Preserve nomes, números, datas e consequências do texto.
+JSON somente: keep, title, briefing (2-3 parágrafos curtos separados por \\n\\n), bullets (4-6), whyItMatters, terms (0-5 {term, explanation}), topic (politica|conflitos|economia|tecnologia|ciencia|mundo), importance (1-5), ongoing.`;
 
 function parseTerms(raw: unknown): GlossaryTerm[] {
   if (!Array.isArray(raw)) {
@@ -56,7 +42,7 @@ function parseTerms(raw: unknown): GlossaryTerm[] {
       return { term, explanation };
     })
     .filter((item): item is GlossaryTerm => item !== null)
-    .slice(0, 8);
+    .slice(0, 5);
 }
 
 function parseModelJson(raw: string): ModelSummary | null {
@@ -84,7 +70,7 @@ function parseModelJson(raw: string): ModelSummary | null {
       ? (parsed.topic as NewsTopic)
       : 'mundo';
     const bullets = Array.isArray(parsed.bullets)
-      ? parsed.bullets.map(String).filter(Boolean).slice(0, 8)
+      ? parsed.bullets.map(String).filter(Boolean).slice(0, 6)
       : [];
     const briefing = String(parsed.briefing ?? '').trim();
 
@@ -93,14 +79,13 @@ function parseModelJson(raw: string): ModelSummary | null {
     }
 
     const importance = Math.min(5, Math.max(1, Number(parsed.importance) || 3));
-    const terms = parseTerms(parsed.terms);
     return {
       keep: true,
       title: String(parsed.title),
       briefing,
       bullets,
       whyItMatters: String(parsed.whyItMatters),
-      terms,
+      terms: parseTerms(parsed.terms),
       topic,
       importance,
       ongoing: Boolean(parsed.ongoing),
@@ -110,7 +95,7 @@ function parseModelJson(raw: string): ModelSummary | null {
   }
 }
 
-async function callGemini(prompt: string): Promise<string> {
+async function callGeminiOnce(prompt: string): Promise<string> {
   const { apiKey, model } = getGeminiConfig();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY ausente no arquivo .env');
@@ -126,6 +111,7 @@ async function callGemini(prompt: string): Promise<string> {
       generationConfig: {
         temperature: 0.2,
         responseMimeType: 'application/json',
+        maxOutputTokens: 1200,
       },
     }),
   });
@@ -145,21 +131,23 @@ async function callGemini(prompt: string): Promise<string> {
   return text;
 }
 
-function buildPrompt(cluster: ArticleCluster, extra?: string): string {
+function callGemini(prompt: string): Promise<string> {
+  return enqueueGemini(() => callGeminiOnce(prompt));
+}
+
+function buildPrompt(cluster: ArticleCluster): string {
   const article = longestText(cluster);
   const sources = cluster.articles
+    .slice(0, 3)
     .map((item) => `${item.outlet}: ${item.url}`)
     .join('\n');
 
   return [
-    extra ?? '',
-    `Título original: ${article.title}`,
+    `Título: ${article.title}`,
     `Publicado: ${article.publishedAt}`,
     `Fontes:\n${sources}`,
-    `Texto:\n${article.text.slice(0, 9000)}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    `Texto:\n${article.text.slice(0, 4500)}`,
+  ].join('\n\n');
 }
 
 export async function summarizeCluster(
@@ -168,39 +156,15 @@ export async function summarizeCluster(
 ): Promise<NewsItem | null> {
   const article = longestText(cluster);
   const leadNumbers = extractLeadNumbers(article.text);
-  let parsed = parseModelJson(await callGemini(buildPrompt(cluster)));
+  const parsed = parseModelJson(await callGemini(buildPrompt(cluster)));
 
-  if (!parsed) {
+  if (!parsed?.keep) {
     return null;
   }
 
-  if (!parsed.keep) {
-    return null;
-  }
-
-  let numbersUnverified = false;
   const summaryText = `${parsed.title} ${parsed.briefing} ${parsed.bullets.join(' ')} ${parsed.whyItMatters}`;
-  const missing = missingNumbers(leadNumbers, summaryText);
-  if (missing.length > 0) {
-    const retry = parseModelJson(
-      await callGemini(
-        buildPrompt(
-          cluster,
-          `Inclua estes números do texto original no resumo, se ainda forem do trecho principal: ${missing.join(', ')}`,
-        ),
-      ),
-    );
-    if (retry?.keep) {
-      parsed = retry;
-      numbersUnverified =
-        missingNumbers(
-          leadNumbers,
-          `${retry.title} ${retry.briefing} ${retry.bullets.join(' ')} ${retry.whyItMatters}`,
-        ).length > 0;
-    } else {
-      numbersUnverified = true;
-    }
-  }
+  // Skip a second Gemini round-trip; flag numbers instead of burning another RPM.
+  const numbersUnverified = missingNumbers(leadNumbers, summaryText).length > 0;
 
   const topic =
     topicOverride && NEWS_TOPICS.includes(topicOverride)
