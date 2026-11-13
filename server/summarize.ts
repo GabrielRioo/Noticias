@@ -2,7 +2,7 @@ import { NEWS_TOPICS, type GlossaryTerm, type NewsItem, type NewsTopic } from '.
 import { getGeminiConfig } from './env.js';
 import { extractLeadNumbers, missingNumbers } from './text.js';
 import type { ArticleCluster } from './cluster.js';
-import { longestText } from './cluster.js';
+import { heuristicScore, longestText } from './cluster.js';
 
 type ModelSummary = {
   keep: boolean;
@@ -222,5 +222,35 @@ export async function summarizeCluster(
     publishedAt: article.publishedAt,
     sources: cluster.articles.map((item) => ({ outlet: item.outlet, url: item.url })),
     numbersUnverified,
+  };
+}
+
+/** Last-resort item so a topic is never blank when RSS still has something. */
+export function draftFromCluster(cluster: ArticleCluster, topic: NewsTopic): NewsItem {
+  const article = longestText(cluster);
+  const paragraphs = article.text
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 40);
+  const briefing =
+    paragraphs.slice(0, 3).join('\n\n').slice(0, 1400) ||
+    article.text.slice(0, 900) ||
+    article.title;
+  const bullets = (paragraphs.length > 0 ? paragraphs : [article.text || article.title])
+    .slice(0, 5)
+    .map((part) => part.slice(0, 180));
+
+  return {
+    id: cluster.id,
+    title: article.title,
+    briefing,
+    bullets,
+    whyItMatters: 'Versão rápida a partir do feed para não deixar a editoria vazia. Confira a matéria original.',
+    topic,
+    importance: Math.min(5, Math.max(1, heuristicScore(article))),
+    publishedAt: article.publishedAt,
+    sources: cluster.articles.map((item) => ({ outlet: item.outlet, url: item.url })),
+    numbersUnverified: true,
+    ongoing: topic === 'conflitos',
   };
 }

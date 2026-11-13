@@ -119,12 +119,12 @@ export function HomePage() {
               </Typography>
               <Typography variant="h3" sx={{ mt: 1, mb: 1.5, fontSize: '2rem' }}>
                 {items.length > 0
-                  ? 'Nada recente para mostrar neste recorte.'
+                  ? 'Esta editoria ainda não veio no fechamento.'
                   : 'Ainda não há o que ler neste recorte.'}
               </Typography>
               <Typography color="text.secondary">
                 {items.length > 0
-                  ? 'As lidas com mais de uma semana saem da capa. Atualize a edição para buscar algo novo em cada editoria.'
+                  ? 'Atualize a edição de novo — o fechamento tenta preencher todas as categorias, mesmo com algo menos recente.'
                   : 'Atualize a edição para puxar a notícia mais recente de cada editoria.'}
               </Typography>
             </Box>

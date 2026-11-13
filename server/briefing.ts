@@ -7,12 +7,15 @@ import {
 import { getGeminiConfig } from './env.js';
 import { FEEDS } from './feeds.js';
 import { collectArticles } from './rss.js';
-import { summarizeCluster } from './summarize.js';
+import { draftFromCluster, summarizeCluster } from './summarize.js';
 import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.js';
 
 const KEPT_PER_TOPIC = 8;
-/** How many RSS candidates to try per empty topic in one refresh. */
-const FILL_ATTEMPTS_PER_TOPIC = 3;
+/** How many RSS candidates to try with Gemini per empty topic. */
+const FILL_ATTEMPTS_PER_TOPIC = 4;
+
+const CONFLICT_HINT =
+  /guerra|conflito|gaza|ucr[aâ]nia|israel|hamas|otan|m[ií]ssil|ataque|hezbollah|ir[aã]|taiwan|ciss[aã]o|ocupa/i;
 
 const FEED_TOPIC = new Map<string, NewsTopic>(
   FEEDS.filter((feed) => feed.opensEdition !== false).map((feed) => [feed.id, feed.topic]),
@@ -47,6 +50,10 @@ function bestUnreadForTopic(
   )[0];
 }
 
+function hasTopicItem(items: readonly NewsItem[], topic: NewsTopic): boolean {
+  return withBriefing(items).some((item) => item.topic === topic);
+}
+
 function retainRecent(items: NewsItem[]): NewsItem[] {
   const grouped = new Map<NewsTopic, NewsItem[]>();
 
@@ -69,6 +76,14 @@ function clusterTopic(cluster: ArticleCluster): NewsTopic | undefined {
   return feedId ? FEED_TOPIC.get(feedId) : undefined;
 }
 
+function clusterLooksLikeConflict(cluster: ArticleCluster): boolean {
+  const seed = cluster.articles[0];
+  if (!seed) {
+    return false;
+  }
+  return CONFLICT_HINT.test(`${seed.title} ${seed.text.slice(0, 400)}`);
+}
+
 function isUnknownCluster(cluster: ArticleCluster, known: ReadonlySet<string>): boolean {
   return cluster.articles.every(
     (article) => !known.has(article.id) && !known.has(article.url) && !known.has(cluster.id),
@@ -80,9 +95,39 @@ function candidatesForTopic(
   topic: NewsTopic,
   known: ReadonlySet<string>,
 ): ArticleCluster[] {
-  return clusters
+  const direct = clusters
     .filter((cluster) => clusterTopic(cluster) === topic)
-    .filter((cluster) => isUnknownCluster(cluster, known))
+    .filter((cluster) => isUnknownCluster(cluster, known));
+
+  const borrowed =
+    topic === 'conflitos'
+      ? clusters
+          .filter((cluster) => clusterTopic(cluster) === 'mundo')
+          .filter((cluster) => clusterLooksLikeConflict(cluster))
+          .filter((cluster) => isUnknownCluster(cluster, known))
+      : [];
+
+  return [...direct, ...borrowed].sort(
+    (left, right) => clusterRelevance(right) - clusterRelevance(left),
+  );
+}
+
+/** Includes already-seen clusters so an empty topic can still get a draft fallback. */
+function anyCandidatesForTopic(
+  clusters: readonly ArticleCluster[],
+  topic: NewsTopic,
+  occupiedIds: ReadonlySet<string>,
+): ArticleCluster[] {
+  const direct = clusters.filter((cluster) => clusterTopic(cluster) === topic);
+  const borrowed =
+    topic === 'conflitos'
+      ? clusters.filter(
+          (cluster) => clusterTopic(cluster) === 'mundo' && clusterLooksLikeConflict(cluster),
+        )
+      : [];
+
+  return [...direct, ...borrowed]
+    .filter((cluster) => !occupiedIds.has(cluster.id))
     .sort((left, right) => clusterRelevance(right) - clusterRelevance(left));
 }
 
@@ -96,7 +141,7 @@ function markClusterKnown(cluster: ArticleCluster, known: Set<string>): void {
 
 /**
  * For every topic without an unread item, try candidates in relevance order until one sticks.
- * For topics that already have unread, still try one stronger/newer candidate.
+ * Ends with a hard RSS draft so no topic stays blank when the feed still has articles.
  */
 async function fillTopics(
   clusters: ArticleCluster[],
@@ -136,7 +181,7 @@ async function fillTopics(
     }),
   );
 
-  // Wave 2: topics still empty — try next candidates sequentially per topic.
+  // Wave 2: topics still empty — try next candidates sequentially.
   for (const topic of NEWS_TOPICS) {
     if (bestUnreadForTopic(items, topic, excluded)) {
       continue;
@@ -151,7 +196,7 @@ async function fillTopics(
     }
   }
 
-  // Wave 3: topics that already have unread — upgrade if a clearly better unknown story exists.
+  // Wave 3: upgrade topics that already have unread when a newer story appears.
   await Promise.all(
     NEWS_TOPICS.map(async (topic) => {
       const current = bestUnreadForTopic(items, topic, excluded);
@@ -167,7 +212,6 @@ async function fillTopics(
       const betterTime = Math.max(
         ...better.articles.map((article) => publishedTime(article.publishedAt)),
       );
-      // Only pull a newer story; otherwise keep the unread queue stable for "next after read".
       if (betterTime <= publishedTime(current.publishedAt)) {
         return;
       }
@@ -175,6 +219,25 @@ async function fillTopics(
       await summarizeOne(better, topic);
     }),
   );
+
+  // Wave 4: hard guarantee — if a topic still has zero items, draft from RSS.
+  const occupied = new Set(items.map((item) => item.id));
+  for (const topic of NEWS_TOPICS) {
+    if (hasTopicItem(items, topic)) {
+      continue;
+    }
+
+    const [fallback] = anyCandidatesForTopic(clusters, topic, occupied);
+    if (!fallback) {
+      console.warn(`Sem RSS utilizável para preencher a editoria ${topic}`);
+      continue;
+    }
+
+    const drafted = draftFromCluster(fallback, topic);
+    items.push(drafted);
+    occupied.add(drafted.id);
+    markClusterKnown(fallback, known);
+  }
 }
 
 export async function refreshBriefing(
@@ -187,10 +250,11 @@ export async function refreshBriefing(
   const excluded = new Set(readIds);
   const cache = readCache();
   const items = withBriefing(cache.items);
-  const known = new Set([
-    ...items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
-    ...cache.skippedIds,
-  ]);
+  // Do not block empty-topic refill with old skippedIds — only avoid re-summarizing
+  // stories already kept in cache.
+  const known = new Set(
+    items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
+  );
 
   const articles = await collectArticles();
   const clusters = clusterArticles(articles);
@@ -205,8 +269,8 @@ export async function refreshBriefing(
   };
   writeCache(next);
 
-  // Always expose at least one item per topic when the cache has anything for it
-  // (unread preferred; otherwise the best retained story so the category is never blank).
+  // Always expose at least one item per topic when available
+  // (unread preferred; otherwise the best retained story).
   const edition: NewsItem[] = [];
   for (const topic of NEWS_TOPICS) {
     const unread = bestUnreadForTopic(next.items, topic, excluded);
@@ -220,7 +284,6 @@ export async function refreshBriefing(
     }
   }
 
-  // Return retained pool + guarantee edition items are present for the client picker.
   const byId = new Map(next.items.map((item) => [item.id, item]));
   for (const item of edition) {
     byId.set(item.id, item);
