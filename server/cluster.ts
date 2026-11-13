@@ -9,7 +9,7 @@ export type ArticleCluster = {
   articles: RawArticle[];
 };
 
-function heuristicScore(article: RawArticle): number {
+export function heuristicScore(article: RawArticle): number {
   const haystack = `${article.title} ${article.text.slice(0, 400)}`.toLowerCase();
   const signals = [
     'governo',
@@ -125,4 +125,11 @@ export function longestText(cluster: ArticleCluster): RawArticle {
     (best, current) => (current.text.length > best.text.length ? current : best),
     first,
   );
+}
+
+export function clusterRelevance(cluster: ArticleCluster): number {
+  const seed = longestText(cluster);
+  const published = new Date(seed.publishedAt).getTime();
+  const time = Number.isNaN(published) ? 0 : published;
+  return heuristicScore(seed) * 1e15 + time;
 }

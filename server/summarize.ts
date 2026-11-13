@@ -162,7 +162,10 @@ function buildPrompt(cluster: ArticleCluster, extra?: string): string {
     .join('\n\n');
 }
 
-export async function summarizeCluster(cluster: ArticleCluster): Promise<NewsItem | null> {
+export async function summarizeCluster(
+  cluster: ArticleCluster,
+  topicOverride?: NewsTopic,
+): Promise<NewsItem | null> {
   const article = longestText(cluster);
   const leadNumbers = extractLeadNumbers(article.text);
   let parsed = parseModelJson(await callGemini(buildPrompt(cluster)));
@@ -199,6 +202,13 @@ export async function summarizeCluster(cluster: ArticleCluster): Promise<NewsIte
     }
   }
 
+  const topic =
+    topicOverride && NEWS_TOPICS.includes(topicOverride)
+      ? topicOverride
+      : NEWS_TOPICS.includes(parsed.topic as NewsTopic)
+        ? (parsed.topic as NewsTopic)
+        : 'mundo';
+
   return {
     id: cluster.id,
     title: parsed.title,
@@ -207,7 +217,7 @@ export async function summarizeCluster(cluster: ArticleCluster): Promise<NewsIte
     whyItMatters: parsed.whyItMatters,
     terms: parsed.terms,
     ongoing: parsed.ongoing,
-    topic: parsed.topic,
+    topic,
     importance: parsed.importance,
     publishedAt: article.publishedAt,
     sources: cluster.articles.map((item) => ({ outlet: item.outlet, url: item.url })),

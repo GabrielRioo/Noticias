@@ -18,16 +18,20 @@ function publishedTime(value: string): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
-function byRecency(items: NewsItem[]): NewsItem[] {
-  return [...items].sort(
-    (left, right) => publishedTime(right.publishedAt) - publishedTime(left.publishedAt),
-  );
+function byRelevance(items: NewsItem[]): NewsItem[] {
+  return [...items].sort((left, right) => {
+    const importanceDiff = (right.importance ?? 0) - (left.importance ?? 0);
+    if (importanceDiff !== 0) {
+      return importanceDiff;
+    }
+    return publishedTime(right.publishedAt) - publishedTime(left.publishedAt);
+  });
 }
 
 /**
- * Per topic: newest unread as full story when available.
+ * Per topic: most relevant unread as full story when available.
  * Always keeps the last read as a headline when it was read within 1 week.
- * If there is no unread, falls back to a recent item from the API cache.
+ * If there is no unread, falls back to the best item from the API cache.
  */
 export function pickEditionEntries(
   items: readonly NewsItem[],
@@ -40,7 +44,7 @@ export function pickEditionEntries(
   const entries: EditionEntry[] = [];
 
   for (const currentTopic of topics) {
-    const candidates = byRecency(
+    const candidates = byRelevance(
       items.filter((item) => item.topic === currentTopic && Boolean(item.briefing?.trim())),
     );
     const unread = candidates.find((item) => !readIds.has(item.id));
@@ -73,6 +77,10 @@ export function pickEditionEntries(
   return entries.sort((left, right) => {
     if (left.mode !== right.mode) {
       return left.mode === 'full' ? -1 : 1;
+    }
+    const importanceDiff = (right.item.importance ?? 0) - (left.item.importance ?? 0);
+    if (importanceDiff !== 0) {
+      return importanceDiff;
     }
     return publishedTime(right.item.publishedAt) - publishedTime(left.item.publishedAt);
   });
