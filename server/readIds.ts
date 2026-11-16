@@ -1,5 +1,6 @@
 const MAX_READ_IDS = 200;
-const MAX_READ_ID_LENGTH = 500;
+/** News item ids are source URLs (Google News links can be very long). */
+const MAX_READ_ID_LENGTH = 4_000;
 
 export function parseReadIds(body: unknown): string[] {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -10,14 +11,20 @@ export function parseReadIds(body: unknown): string[] {
   if (readIds === undefined) {
     return [];
   }
-  if (!Array.isArray(readIds) || readIds.length > MAX_READ_IDS) {
+  if (!Array.isArray(readIds)) {
     throw new Error('readIds inválido');
   }
 
-  return readIds.map((id) => {
-    if (typeof id !== 'string' || id.length === 0 || id.length > MAX_READ_ID_LENGTH) {
-      throw new Error('readIds inválido');
+  const cleaned: string[] = [];
+  for (const id of readIds.slice(-MAX_READ_IDS)) {
+    if (typeof id !== 'string') {
+      continue;
     }
-    return id;
-  });
+    const trimmed = id.trim();
+    if (!trimmed || trimmed.length > MAX_READ_ID_LENGTH) {
+      continue;
+    }
+    cleaned.push(trimmed);
+  }
+  return cleaned;
 }

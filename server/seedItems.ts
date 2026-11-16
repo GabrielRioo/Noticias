@@ -56,8 +56,9 @@ function parseOne(value: unknown): NewsItem | null {
   if (!raw.id.trim() || !raw.title.trim() || !briefing) {
     return null;
   }
+  // Ids are source URLs; Google News links routinely exceed 500 chars.
   if (
-    raw.id.length > 500 ||
+    raw.id.length > 4_000 ||
     raw.title.length > 500 ||
     briefing.length > MAX_STRING ||
     raw.whyItMatters.length > 2_000
