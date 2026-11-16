@@ -60,10 +60,6 @@ function bestUnreadForTopic(
   )[0];
 }
 
-function hasTopicItem(items: readonly NewsItem[], topic: NewsTopic): boolean {
-  return withBriefing(items).some((item) => item.topic === topic);
-}
-
 function retainRecent(items: NewsItem[]): NewsItem[] {
   const grouped = new Map<NewsTopic, NewsItem[]>();
 
@@ -148,26 +144,33 @@ function markClusterKnown(cluster: ArticleCluster, known: Set<string>): void {
   }
 }
 
-function draftTopic(
+/**
+ * Add an unread RSS draft for a topic that still lacks one.
+ * Must run even when the topic already has read items — otherwise refresh
+ * after reading never surfaces the next story without AI.
+ */
+function draftUnreadTopic(
   clusters: ArticleCluster[],
   items: NewsItem[],
   known: Set<string>,
   topic: NewsTopic,
-): void {
-  if (hasTopicItem(items, topic)) {
-    return;
+  excluded: ReadonlySet<string>,
+): boolean {
+  if (bestUnreadForTopic(items, topic, excluded)) {
+    return false;
   }
 
   const occupied = new Set(items.map((item) => item.id));
   const [fallback] = anyCandidatesForTopic(clusters, topic, occupied);
   if (!fallback) {
     console.warn(`Sem RSS utilizável para preencher a editoria ${topic}`);
-    return;
+    return false;
   }
 
   const drafted = draftFromCluster(fallback, topic);
   items.push(drafted);
   markClusterKnown(fallback, known);
+  return true;
 }
 
 /**
@@ -192,13 +195,13 @@ async function fillTopics(
     }
 
     if (withoutAi || aiCalls >= MAX_AI_CALLS_PER_REFRESH) {
-      draftTopic(clusters, items, known, topic);
+      draftUnreadTopic(clusters, items, known, topic, excluded);
       continue;
     }
 
     const [candidate] = candidatesForTopic(clusters, topic, known);
     if (!candidate) {
-      draftTopic(clusters, items, known, topic);
+      draftUnreadTopic(clusters, items, known, topic, excluded);
       continue;
     }
 
@@ -223,7 +226,38 @@ async function fillTopics(
     }
 
     // One AI miss is enough — fall back to RSS draft instead of burning more RPM.
-    draftTopic(clusters, items, known, topic);
+    draftUnreadTopic(clusters, items, known, topic, excluded);
+  }
+
+  // Hard guarantee: every topic without an unread item gets an RSS draft when possible.
+  for (const topic of NEWS_TOPICS) {
+    draftUnreadTopic(clusters, items, known, topic, excluded);
+  }
+
+  // Soft upgrade without AI: if a newer unknown story exists, surface it on refresh
+  // even when the topic already has an unread item.
+  for (const topic of NEWS_TOPICS) {
+    const current = bestUnreadForTopic(items, topic, excluded);
+    if (!current) {
+      continue;
+    }
+
+    const [newer] = candidatesForTopic(clusters, topic, known);
+    if (!newer) {
+      continue;
+    }
+
+    const newerTime = Math.max(
+      ...newer.articles.map((article) => publishedTime(article.publishedAt)),
+    );
+    if (newerTime <= publishedTime(current.publishedAt)) {
+      continue;
+    }
+
+    const drafted = draftFromCluster(newer, topic);
+    drafted.importance = Math.max(drafted.importance, current.importance);
+    items.push(drafted);
+    markClusterKnown(newer, known);
   }
 
   return withoutAi;

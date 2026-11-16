@@ -99,12 +99,16 @@ export function HomePage() {
             </Box>
           ) : null}
 
-          {searchStatus === 'idle' && status === 'error' && error ? (
+          {searchStatus === 'idle' && error ? (
             <Alert
               severity="error"
-              sx={{ my: 4 }}
+              sx={{ my: status === 'error' ? 4 : 3 }}
               action={
-                <Button color="inherit" size="small" onClick={() => void load()}>
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => void (status === 'error' ? load() : refresh())}
+                >
                   Tentar de novo
                 </Button>
               }
