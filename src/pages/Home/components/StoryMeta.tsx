@@ -2,6 +2,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { NewsItem } from '../../../types/news';
 import { TOPIC_LABELS } from '../topicLabels';
+import { SpeakButton } from './SpeakButton';
 
 type StoryMetaProps = {
   item: NewsItem;
@@ -20,7 +21,7 @@ export function StoryMeta({ item }: StoryMetaProps) {
   const outlets = [...new Set(item.sources.map((source) => source.outlet))].join(' · ');
 
   return (
-    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'baseline' }}>
+    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
       <Typography
         variant="overline"
         sx={{ color: 'primary.main', letterSpacing: '0.16em' }}
@@ -30,6 +31,7 @@ export function StoryMeta({ item }: StoryMetaProps) {
       <Typography variant="caption" color="text.secondary">
         {outlets} · {formatWhen(item.publishedAt)}
       </Typography>
+      <SpeakButton item={item} />
     </Stack>
   );
 }
