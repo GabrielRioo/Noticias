@@ -1,3 +1,4 @@
+import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import VolumeOffOutlinedIcon from '@mui/icons-material/VolumeOffOutlined';
@@ -6,6 +7,7 @@ import { useEffect, useState } from 'react';
 import type { NewsItem } from '../../../types/news';
 import {
   getActiveSpeechId,
+  getLoadingSpeechId,
   isSpeechSupported,
   stopSpeech,
   subscribeSpeech,
@@ -15,6 +17,11 @@ import { storyBriefing } from './StoryCopy';
 
 type SpeakButtonProps = {
   item: NewsItem;
+};
+
+type SpeechUi = {
+  activeId: string | null;
+  loadingId: string | null;
 };
 
 function buildSpeechText(item: NewsItem): string {
@@ -31,15 +38,19 @@ function buildSpeechText(item: NewsItem): string {
 }
 
 export function SpeakButton({ item }: SpeakButtonProps) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [speech, setSpeech] = useState<SpeechUi>({
+    activeId: null,
+    loadingId: null,
+  });
   const supported = isSpeechSupported();
-  const speaking = activeId === item.id;
+  const speaking = speech.activeId === item.id;
+  const loading = speech.loadingId === item.id;
 
   useEffect(() => {
-    const unsubscribe = subscribeSpeech(setActiveId);
+    const unsubscribe = subscribeSpeech(setSpeech);
     return () => {
       unsubscribe();
-      if (getActiveSpeechId() === item.id) {
+      if (getActiveSpeechId() === item.id || getLoadingSpeechId() === item.id) {
         stopSpeech();
       }
     };
@@ -49,19 +60,30 @@ export function SpeakButton({ item }: SpeakButtonProps) {
     return null;
   }
 
+  const label = loading
+    ? 'Preparando áudio'
+    : speaking
+      ? 'Parar leitura'
+      : 'Ouvir notícia';
+
   return (
-    <Tooltip title={speaking ? 'Parar leitura' : 'Ouvir notícia'}>
+    <Tooltip title={label}>
       <IconButton
         size="small"
-        aria-label={speaking ? 'Parar leitura' : 'Ouvir notícia'}
+        aria-label={label}
         aria-pressed={speaking}
-        onClick={() => toggleSpeech(item.id, buildSpeechText(item))}
+        aria-busy={loading}
+        onClick={() => {
+          void toggleSpeech(item.id, buildSpeechText(item));
+        }}
         sx={{
           ml: 0.25,
-          color: speaking ? 'primary.main' : 'text.secondary',
+          color: speaking || loading ? 'primary.main' : 'text.secondary',
         }}
       >
-        {speaking ? (
+        {loading ? (
+          <CircularProgress size={14} thickness={5} color="inherit" />
+        ) : speaking ? (
           <VolumeOffOutlinedIcon fontSize="inherit" />
         ) : (
           <VolumeUpOutlinedIcon fontSize="inherit" />

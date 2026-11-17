@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -7,6 +7,7 @@ import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import type { NewsTopic } from '../../types/news';
+import { setEditionWithoutAi } from '../../utils/speech';
 import { GridStory } from './components/GridStory';
 import { LeadStory } from './components/LeadStory';
 import { Masthead } from './components/Masthead';
@@ -39,6 +40,10 @@ export function HomePage() {
     clearSearch,
   } = useHome();
   const [topic, setTopic] = useState<NewsTopic | 'all'>('all');
+
+  useEffect(() => {
+    setEditionWithoutAi(withoutAi);
+  }, [withoutAi]);
   const edition = useMemo(
     () => pickEditionEntries(items, readIds, readHistory, topic),
     [items, readIds, readHistory, topic],

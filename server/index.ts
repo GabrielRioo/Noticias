@@ -4,6 +4,8 @@ import { loadEnvFile } from './env.js';
 import { parseReadIds } from './readIds.js';
 import { parseSeedItems } from './seedItems.js';
 import { normalizeSearchQuery, searchNews } from './search.js';
+import { isGeminiUnavailableError } from './summarize.js';
+import { parseSpeakBody, synthesizeSpeech } from './tts.js';
 
 loadEnvFile();
 
@@ -15,6 +17,15 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     'Content-Type': 'application/json; charset=utf-8',
   });
   response.end(JSON.stringify(body));
+}
+
+function sendWav(response: ServerResponse, wav: Buffer): void {
+  response.writeHead(200, {
+    'Content-Type': 'audio/wav',
+    'Content-Length': wav.length,
+    'Cache-Control': 'no-store',
+  });
+  response.end(wav);
 }
 
 const MAX_BODY_BYTES = 512_000;
@@ -89,6 +100,33 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         message === 'JSON inválido' ||
         message === 'Corpo grande demais';
       sendJson(response, invalidBody ? 400 : 500, { error: message });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/news/speak') {
+    try {
+      const body = await readJsonBody(request);
+      const text = parseSpeakBody(body);
+      const wav = await synthesizeSpeech(text);
+      sendWav(response, wav);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao gerar áudio';
+      const invalidBody =
+        message === 'Texto inválido' ||
+        message === 'Texto longo demais' ||
+        message === 'JSON inválido' ||
+        message === 'Corpo grande demais';
+      if (invalidBody) {
+        sendJson(response, 400, { error: message });
+        return;
+      }
+      if (isGeminiUnavailableError(error)) {
+        sendJson(response, 503, { error: message });
+        return;
+      }
+      sendJson(response, 500, { error: 'Não foi possível gerar o áudio agora.' });
     }
     return;
   }

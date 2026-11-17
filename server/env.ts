@@ -31,3 +31,15 @@ export function getGeminiConfig(): { apiKey: string; model: string } {
   const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash-lite';
   return { apiKey, model };
 }
+
+export function getGeminiTtsConfig(): {
+  apiKey: string;
+  model: string;
+  voice: string;
+} {
+  const apiKey = process.env.GEMINI_API_KEY?.trim() ?? '';
+  const model =
+    process.env.GEMINI_TTS_MODEL?.trim() || 'gemini-2.5-flash-preview-tts';
+  const voice = process.env.GEMINI_TTS_VOICE?.trim() || 'Charon';
+  return { apiKey, model, voice };
+}
