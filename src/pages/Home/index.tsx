@@ -31,6 +31,7 @@ export function HomePage() {
     readHistory,
     load,
     refresh,
+    refreshTopic,
     markRead,
     searchQuery,
     hits,
@@ -78,7 +79,7 @@ export function HomePage() {
         >
           <Masthead
             updatedAt={updatedAt}
-            refreshing={refreshing}
+            refreshing={refreshing !== null}
             searching={searchStatus === 'loading'}
             activeQuery={searchQuery}
             onRefresh={() => void refresh()}
@@ -87,7 +88,13 @@ export function HomePage() {
           />
 
           {searchStatus === 'idle' ? (
-            <TopicFilter topics={topics} value={topic} onTopicChange={setTopic} />
+            <TopicFilter
+              topics={topics}
+              value={topic}
+              refreshing={refreshing}
+              onTopicChange={setTopic}
+              onRefreshTopic={(next) => void refreshTopic(next)}
+            />
           ) : (
             <SearchResults
               query={searchQuery}
@@ -141,7 +148,9 @@ export function HomePage() {
               </Typography>
               <Typography color="text.secondary">
                 {items.length > 0
-                  ? 'Atualize a edição de novo — o fechamento tenta preencher todas as categorias, mesmo com algo menos recente.'
+                  ? topic === 'all'
+                    ? 'Atualize a edição de novo — o fechamento tenta preencher todas as categorias, mesmo com algo menos recente.'
+                    : 'Use “Atualizar” nesta editoria para puxar só ela de novo, sem fechar a edição inteira.'
                   : 'Atualize a edição para puxar a notícia mais recente de cada editoria.'}
               </Typography>
             </Box>

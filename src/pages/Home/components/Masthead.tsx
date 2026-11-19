@@ -10,6 +10,7 @@ type MastheadProps = {
   refreshing: boolean;
   searching: boolean;
   activeQuery: string;
+  refreshLabel?: string;
   onRefresh: () => void;
   onSearch: (query: string) => void;
   onClearSearch: () => void;
@@ -39,6 +40,7 @@ export function Masthead({
   refreshing,
   searching,
   activeQuery,
+  refreshLabel = 'Atualizar edição',
   onRefresh,
   onSearch,
   onClearSearch,
@@ -116,7 +118,7 @@ export function Masthead({
           <Box sx={{ display: 'flex', gap: 1 }}>
             <SearchToggle expanded={showField} onOpen={() => setFieldOpen(true)} />
             <Button size="small" onClick={onRefresh} disabled={refreshing}>
-              {refreshing ? 'Fechando edição…' : 'Atualizar edição'}
+              {refreshing ? 'Fechando edição…' : refreshLabel}
             </Button>
           </Box>
         </Box>

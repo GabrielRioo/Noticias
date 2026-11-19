@@ -1,5 +1,5 @@
 import type { RawArticle } from './rss.js';
-import { titleSimilarity } from './text.js';
+import { hasBrokenEncoding, titleSimilarity } from './text.js';
 
 const WINDOW_MS = 36 * 60 * 60 * 1000;
 const SIMILARITY_THRESHOLD = 0.38;
@@ -143,9 +143,15 @@ export function longestText(cluster: ArticleCluster): RawArticle {
   if (!first) {
     throw new Error('Cluster sem artigos');
   }
-  return cluster.articles.reduce(
+
+  const readable = cluster.articles.filter(
+    (article) => !hasBrokenEncoding(`${article.title} ${article.text}`),
+  );
+  const pool = readable.length > 0 ? readable : cluster.articles;
+
+  return pool.reduce(
     (best, current) => (current.text.length > best.text.length ? current : best),
-    first,
+    pool[0] ?? first,
   );
 }
 

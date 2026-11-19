@@ -13,6 +13,7 @@ import {
   summarizeCluster,
 } from './summarize.js';
 import { NEWS_TOPICS, type NewsItem, type NewsTopic } from '../src/types/news.js';
+import { hasBrokenEncoding } from './text.js';
 
 export type BriefingPayload = {
   items: NewsItem[];
@@ -185,16 +186,18 @@ async function fillTopics(
   excluded: ReadonlySet<string>,
   skippedIds: string[],
   aiDisabled: boolean,
+  topics: readonly NewsTopic[] = NEWS_TOPICS,
 ): Promise<boolean> {
   let aiCalls = 0;
   let withoutAi = aiDisabled;
+  const maxAiCalls = Math.min(MAX_AI_CALLS_PER_REFRESH, Math.max(1, topics.length));
 
-  for (const topic of NEWS_TOPICS) {
+  for (const topic of topics) {
     if (bestUnreadForTopic(items, topic, excluded)) {
       continue;
     }
 
-    if (withoutAi || aiCalls >= MAX_AI_CALLS_PER_REFRESH) {
+    if (withoutAi || aiCalls >= maxAiCalls) {
       draftUnreadTopic(clusters, items, known, topic, excluded);
       continue;
     }
@@ -229,14 +232,14 @@ async function fillTopics(
     draftUnreadTopic(clusters, items, known, topic, excluded);
   }
 
-  // Hard guarantee: every topic without an unread item gets an RSS draft when possible.
-  for (const topic of NEWS_TOPICS) {
+  // Hard guarantee: every requested topic without an unread item gets an RSS draft when possible.
+  for (const topic of topics) {
     draftUnreadTopic(clusters, items, known, topic, excluded);
   }
 
   // Soft upgrade without AI: if a newer unknown story exists, surface it on refresh
   // even when the topic already has an unread item.
-  for (const topic of NEWS_TOPICS) {
+  for (const topic of topics) {
     const current = bestUnreadForTopic(items, topic, excluded);
     if (!current) {
       continue;
@@ -263,13 +266,22 @@ async function fillTopics(
   return withoutAi;
 }
 
+function isReadableItem(item: NewsItem): boolean {
+  const blob = `${item.title}\n${item.briefing ?? ''}\n${item.bullets.join('\n')}`;
+  return !hasBrokenEncoding(blob);
+}
+
 function mergeSeed(cacheItems: readonly NewsItem[], seedItems: readonly NewsItem[]): NewsItem[] {
   const byId = new Map<string, NewsItem>();
   for (const item of withBriefing(seedItems)) {
-    byId.set(item.id, item);
+    if (isReadableItem(item)) {
+      byId.set(item.id, item);
+    }
   }
   for (const item of withBriefing(cacheItems)) {
-    byId.set(item.id, item);
+    if (isReadableItem(item)) {
+      byId.set(item.id, item);
+    }
   }
   return [...byId.values()];
 }
@@ -277,20 +289,24 @@ function mergeSeed(cacheItems: readonly NewsItem[], seedItems: readonly NewsItem
 export async function refreshBriefing(
   readIds: readonly string[] = [],
   seedItems: readonly NewsItem[] = [],
+  topic?: NewsTopic,
 ): Promise<BriefingPayload> {
   const aiDisabled = !getGeminiConfig().apiKey;
   if (aiDisabled) {
     console.warn('GEMINI_API_KEY ausente — fechando edição só com feeds RSS.');
   }
 
+  const topics = topic ? [topic] : NEWS_TOPICS;
   const excluded = new Set(readIds);
   const cache = readCache();
-  const items = mergeSeed(cache.items, seedItems);
+  // Topic refresh rebuilds that editoria from fresh RSS (drops stale/broken drafts).
+  const merged = mergeSeed(cache.items, seedItems);
+  const items = topic ? merged.filter((item) => item.topic !== topic) : merged;
   const known = new Set(
     items.flatMap((item) => [item.id, ...item.sources.map((source) => source.url)]),
   );
 
-  const articles = await collectArticles();
+  const articles = await collectArticles(topic);
   const clusters = clusterArticles(articles);
   const skippedIds = [...cache.skippedIds];
 
@@ -301,24 +317,25 @@ export async function refreshBriefing(
     excluded,
     skippedIds,
     aiDisabled,
+    topics,
   );
 
   const next = {
     updatedAt: new Date().toISOString(),
     items: retainRecent(items),
     skippedIds: skippedIds.slice(-400),
-    withoutAi,
+    withoutAi: topic ? cache.withoutAi || withoutAi : withoutAi,
   };
   writeCache(next);
 
   const edition: NewsItem[] = [];
-  for (const topic of NEWS_TOPICS) {
-    const unread = bestUnreadForTopic(next.items, topic, excluded);
+  for (const editionTopic of NEWS_TOPICS) {
+    const unread = bestUnreadForTopic(next.items, editionTopic, excluded);
     if (unread) {
       edition.push(unread);
       continue;
     }
-    const fallback = byRelevance(next.items.filter((item) => item.topic === topic))[0];
+    const fallback = byRelevance(next.items.filter((item) => item.topic === editionTopic))[0];
     if (fallback) {
       edition.push(fallback);
     }
@@ -329,7 +346,7 @@ export async function refreshBriefing(
     byId.set(item.id, item);
   }
 
-  return { items: [...byId.values()], updatedAt: next.updatedAt, withoutAi };
+  return { items: [...byId.values()], updatedAt: next.updatedAt, withoutAi: next.withoutAi };
 }
 
 export function listBriefing(): BriefingPayload {

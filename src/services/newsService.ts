@@ -1,4 +1,4 @@
-import type { NewsItem, SearchHit } from '../types/news';
+import type { NewsItem, NewsTopic, SearchHit } from '../types/news';
 
 export type NewsListResponse = {
   items: NewsItem[];
@@ -33,11 +33,12 @@ export async function searchNews(query: string): Promise<SearchResponse> {
 export async function refreshNews(
   readIds: readonly string[],
   items: readonly NewsItem[] = [],
+  topic?: NewsTopic,
 ): Promise<NewsListResponse> {
   const response = await fetch('/api/news/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ readIds, items }),
+    body: JSON.stringify(topic ? { readIds, items, topic } : { readIds, items }),
   });
   return parseJson<NewsListResponse>(response);
 }

@@ -5,6 +5,7 @@ import {
   SEARCH_QUERY_MAX_LENGTH,
   SEARCH_QUERY_MIN_LENGTH,
   type NewsItem,
+  type NewsTopic,
   type SearchHit,
 } from '../../../types/news';
 import {
@@ -95,7 +96,7 @@ export function useHome() {
   const [withoutAi, setWithoutAi] = useState(initial.withoutAi);
   const [status, setStatus] = useState<Status>(initial.status);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState<null | 'all' | NewsTopic>(null);
   const [readIds, setReadIds] = useState<Set<string>>(readStoredIds);
   const [readHistory, setReadHistory] = useState<ReadHistory>(loadReadHistory);
   const [searchQuery, setSearchQuery] = useState(readSearchParam);
@@ -246,7 +247,7 @@ export function useHome() {
   }, [applyPayload]);
 
   const refresh = useCallback(async () => {
-    setRefreshing(true);
+    setRefreshing('all');
     setError(null);
     // Snapshot current edition before the request so a failed refresh still keeps it.
     saveEditionCache(itemsRef.current, updatedAt, withoutAi);
@@ -257,9 +258,42 @@ export function useHome() {
       setError(caught instanceof Error ? caught.message : 'Falha ao atualizar');
       setStatus((current) => (itemsRef.current.length === 0 ? 'error' : current));
     } finally {
-      setRefreshing(false);
+      setRefreshing(null);
     }
   }, [applyPayload, readIds, updatedAt, withoutAi]);
+
+  const refreshTopic = useCallback(
+    async (topic: NewsTopic) => {
+      setRefreshing(topic);
+      setError(null);
+      saveEditionCache(itemsRef.current, updatedAt, withoutAi);
+      try {
+        const payload = await refreshNews(
+          [...readIds].slice(-200),
+          itemsRef.current.filter((item) => item.topic !== topic).slice(0, 48),
+          topic,
+        );
+        // Replace only this editoria so stale/broken local drafts do not stick around.
+        applyPayload(
+          {
+            items: [
+              ...itemsRef.current.filter((item) => item.topic !== topic),
+              ...payload.items.filter((item) => item.topic === topic),
+            ],
+            updatedAt: payload.updatedAt,
+            withoutAi: payload.withoutAi,
+          },
+          false,
+        );
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Falha ao atualizar a editoria');
+        setStatus((current) => (itemsRef.current.length === 0 ? 'error' : current));
+      } finally {
+        setRefreshing(null);
+      }
+    },
+    [applyPayload, readIds, updatedAt, withoutAi],
+  );
 
   const clearSearch = useCallback(() => {
     searchRequest.current += 1;
@@ -292,6 +326,7 @@ export function useHome() {
     readHistory,
     load,
     refresh,
+    refreshTopic,
     markRead,
     searchQuery,
     hits,

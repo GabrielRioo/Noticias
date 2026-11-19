@@ -5,6 +5,7 @@ import { parseReadIds } from './readIds.js';
 import { parseSeedItems } from './seedItems.js';
 import { normalizeSearchQuery, searchNews } from './search.js';
 import { isGeminiUnavailableError } from './summarize.js';
+import { parseTopic } from './topic.js';
 import { parseSpeakBody, synthesizeSpeech } from './tts.js';
 
 loadEnvFile();
@@ -90,13 +91,15 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       const body = await readJsonBody(request);
       const readIds = parseReadIds(body);
       const seedItems = parseSeedItems(body);
-      const payload = await refreshBriefing(readIds, seedItems);
+      const topic = parseTopic(body);
+      const payload = await refreshBriefing(readIds, seedItems, topic);
       sendJson(response, 200, payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao atualizar o briefing';
       const invalidBody =
         message === 'readIds inválido' ||
         message === 'items inválido' ||
+        message === 'topic inválido' ||
         message === 'JSON inválido' ||
         message === 'Corpo grande demais';
       sendJson(response, invalidBody ? 400 : 500, { error: message });

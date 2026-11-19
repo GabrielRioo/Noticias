@@ -13,9 +13,14 @@ const NOISE_PATTERNS = [
   /📲[\s\S]*/g,
 ];
 
+export function hasBrokenEncoding(value: string): boolean {
+  return value.includes('\uFFFD');
+}
+
 export function stripHtml(value: string): string {
   return decodeHTML(
     value
+      .replace(/\uFFFD+/g, ' ')
       .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -34,7 +39,7 @@ export function cleanArticleText(value: string): string {
   for (const pattern of NOISE_PATTERNS) {
     text = text.replace(pattern, ' ');
   }
-  return text.replace(/\s+/g, ' ').trim();
+  return text.replace(/\uFFFD+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function extractLeadNumbers(text: string): string[] {

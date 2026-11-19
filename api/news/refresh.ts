@@ -2,6 +2,7 @@ import { refreshBriefing } from '../../server/briefing.js';
 import { loadEnvFile } from '../../server/env.js';
 import { parseReadIds } from '../../server/readIds.js';
 import { parseSeedItems } from '../../server/seedItems.js';
+import { parseTopic } from '../../server/topic.js';
 
 loadEnvFile();
 
@@ -49,12 +50,14 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const body = readBody(request.body);
     const readIds = parseReadIds(body);
     const seedItems = parseSeedItems(body);
-    response.status(200).json(await refreshBriefing(readIds, seedItems));
+    const topic = parseTopic(body);
+    response.status(200).json(await refreshBriefing(readIds, seedItems, topic));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Falha ao atualizar o briefing';
     const invalidBody =
       message === 'readIds inválido' ||
       message === 'items inválido' ||
+      message === 'topic inválido' ||
       message === 'JSON inválido' ||
       message === 'Corpo grande demais';
     response.status(invalidBody ? 400 : 500).json({ error: message });

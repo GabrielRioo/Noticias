@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import Parser from 'rss-parser';
-import type { SearchHit } from '../src/types/news.js';
+import type { NewsTopic, SearchHit } from '../src/types/news.js';
 import { FEEDS, type FeedConfig } from './feeds.js';
 import { cleanArticleText } from './text.js';
 
@@ -69,23 +69,68 @@ function resolveNodeEncoding(label: string): BufferEncoding {
   return 'utf8';
 }
 
-function detectXmlEncoding(buf: Buffer, contentType?: string): BufferEncoding {
-  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    return 'utf8';
-  }
+function countMatches(text: string, pattern: RegExp): number {
+  return text.match(pattern)?.length ?? 0;
+}
 
-  const charsetMatch = (contentType ?? '').match(/charset\s*=\s*([^\s;]+)/i);
-  if (charsetMatch?.[1]) {
-    return resolveNodeEncoding(charsetMatch[1]);
+/** Prefer decodes with real Portuguese accents and almost no U+FFFD. */
+function scoreDecodedXml(text: string): number {
+  const fffd = countMatches(text, /\uFFFD/g);
+  const accents = countMatches(
+    text,
+    /[áàâãäéèêëíìîïóòôõöúùûüçñÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ]/g,
+  );
+  const mojibake = countMatches(text, /Ã.|Â.|â€|ðŸ/g);
+  return accents * 4 - fffd * 80 - mojibake * 8;
+}
+
+function uniqueEncodings(values: BufferEncoding[]): BufferEncoding[] {
+  const seen = new Set<BufferEncoding>();
+  const unique: BufferEncoding[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    unique.push(value);
+  }
+  return unique;
+}
+
+/**
+ * Folha and others often declare ISO-8859-1 in XML while a proxy lies with
+ * Content-Type charset=utf-8. Trust the XML declaration first, then pick the
+ * decode with the best accent/FFFD score.
+ */
+function decodeXmlBuffer(buf: Buffer, contentType?: string): string {
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return buf.subarray(3).toString('utf8');
   }
 
   const head = buf.subarray(0, 256).toString('latin1');
   const xmlMatch = head.match(/encoding\s*=\s*["']?\s*([a-z0-9\-]+)/i);
-  if (xmlMatch?.[1]) {
-    return resolveNodeEncoding(xmlMatch[1]);
+  const charsetMatch = (contentType ?? '').match(/charset\s*=\s*([^\s;]+)/i);
+
+  const candidates = uniqueEncodings([
+    ...(xmlMatch?.[1] ? [resolveNodeEncoding(xmlMatch[1])] : []),
+    ...(charsetMatch?.[1] ? [resolveNodeEncoding(charsetMatch[1])] : []),
+    'utf8',
+    'latin1',
+  ]);
+
+  let bestText = buf.toString(candidates[0] ?? 'utf8');
+  let bestScore = scoreDecodedXml(bestText);
+
+  for (const encoding of candidates.slice(1)) {
+    const text = buf.toString(encoding);
+    const score = scoreDecodedXml(text);
+    if (score > bestScore) {
+      bestText = text;
+      bestScore = score;
+    }
   }
 
-  return 'utf8';
+  return bestText;
 }
 
 function fetchFeedXml(feedUrl: string, redirectCount = 0): Promise<string> {
@@ -130,8 +175,7 @@ function fetchFeedXml(feedUrl: string, redirectCount = 0): Promise<string> {
           try {
             const raw = Buffer.concat(chunks);
             const body = decompressBody(raw, res.headers['content-encoding']);
-            const encoding = detectXmlEncoding(body, res.headers['content-type']);
-            resolve(body.toString(encoding));
+            resolve(decodeXmlBuffer(body, res.headers['content-type']));
           } catch (error) {
             reject(error);
           }
@@ -178,7 +222,11 @@ async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
         })
         .filter((item) => {
           const minLength = feed.minTextLength ?? MIN_TEXT_LENGTH;
-          return item.title && item.url && item.text.length >= minLength;
+          if (!item.title || !item.url || item.text.length < minLength) {
+            return false;
+          }
+          // Never publish mojibake / replacement-character garbage.
+          return !/\uFFFD/.test(`${item.title} ${item.text}`);
         });
     } catch (error) {
       lastError = error;
@@ -274,8 +322,22 @@ export async function collectSearchArticles(query: string): Promise<SearchHit[]>
   return articles;
 }
 
-export async function collectArticles(): Promise<RawArticle[]> {
-  const batches = await Promise.all(FEEDS.map((feed) => fetchFeed(feed)));
+function feedsForTopic(topic?: NewsTopic): FeedConfig[] {
+  if (!topic) {
+    return FEEDS;
+  }
+
+  return FEEDS.filter((feed) => {
+    if (feed.topic === topic) {
+      return true;
+    }
+    // Conflitos also borrows from mundo feeds.
+    return topic === 'conflitos' && feed.topic === 'mundo';
+  });
+}
+
+export async function collectArticles(topic?: NewsTopic): Promise<RawArticle[]> {
+  const batches = await Promise.all(feedsForTopic(topic).map((feed) => fetchFeed(feed)));
   const byUrl = new Map<string, RawArticle>();
 
   for (const article of batches.flat()) {
