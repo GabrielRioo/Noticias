@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import Parser from 'rss-parser';
 import type { SearchHit } from '../src/types/news.js';
 import { FEEDS, type FeedConfig } from './feeds.js';
@@ -24,16 +27,139 @@ export type RawArticle = {
 };
 
 const MIN_TEXT_LENGTH = 280;
+const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 15_000;
+
+function decompressBody(buf: Buffer, contentEncoding?: string): Buffer {
+  const encoding = (contentEncoding ?? '').toLowerCase();
+  const looksGzip = buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+
+  if (encoding.includes('gzip') || looksGzip) {
+    return gunzipSync(buf);
+  }
+  if (encoding.includes('br')) {
+    return brotliDecompressSync(buf);
+  }
+  if (encoding.includes('deflate')) {
+    try {
+      return inflateSync(buf);
+    } catch {
+      return buf;
+    }
+  }
+  return buf;
+}
+
+function resolveNodeEncoding(label: string): BufferEncoding {
+  const normalized = label.trim().toLowerCase().replace(/['"]/g, '');
+  if (normalized === 'utf-8' || normalized === 'utf8') {
+    return 'utf8';
+  }
+  if (
+    normalized === 'iso-8859-1' ||
+    normalized === 'latin1' ||
+    normalized === 'windows-1252' ||
+    normalized === 'cp1252'
+  ) {
+    return 'latin1';
+  }
+  if (normalized === 'utf-16le' || normalized === 'utf16le') {
+    return 'utf16le';
+  }
+  return 'utf8';
+}
+
+function detectXmlEncoding(buf: Buffer, contentType?: string): BufferEncoding {
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return 'utf8';
+  }
+
+  const charsetMatch = (contentType ?? '').match(/charset\s*=\s*([^\s;]+)/i);
+  if (charsetMatch?.[1]) {
+    return resolveNodeEncoding(charsetMatch[1]);
+  }
+
+  const head = buf.subarray(0, 256).toString('latin1');
+  const xmlMatch = head.match(/encoding\s*=\s*["']?\s*([a-z0-9\-]+)/i);
+  if (xmlMatch?.[1]) {
+    return resolveNodeEncoding(xmlMatch[1]);
+  }
+
+  return 'utf8';
+}
+
+function fetchFeedXml(feedUrl: string, redirectCount = 0): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const client = feedUrl.startsWith('https') ? https : http;
+    const req = client.get(
+      feedUrl,
+      {
+        headers: {
+          'User-Agent': 'BriefingPessoal/1.0 (leitor RSS local)',
+          Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+        },
+      },
+      (res) => {
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          res.resume();
+          if (redirectCount >= MAX_REDIRECTS) {
+            reject(new Error(`Too many redirects for ${feedUrl}`));
+            return;
+          }
+          const next = new URL(res.headers.location, feedUrl).toString();
+          resolve(fetchFeedXml(next, redirectCount + 1));
+          return;
+        }
+
+        if (!res.statusCode || res.statusCode >= 400) {
+          res.resume();
+          reject(new Error(`Feed HTTP ${res.statusCode ?? 0} for ${feedUrl}`));
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        res.on('end', () => {
+          try {
+            const raw = Buffer.concat(chunks);
+            const body = decompressBody(raw, res.headers['content-encoding']);
+            const encoding = detectXmlEncoding(body, res.headers['content-type']);
+            resolve(body.toString(encoding));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
+
+    req.setTimeout(FETCH_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Feed timed out after ${FETCH_TIMEOUT_MS}ms`));
+    });
+    req.on('error', reject);
+  });
+}
+
+async function parseFeedUrl(url: string) {
+  const xml = await fetchFeedXml(url);
+  return parser.parseString(xml);
+}
 
 async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
   let lastError: unknown;
 
   for (const url of feed.urls) {
     try {
-      const parsed = await parser.parseURL(url);
+      const parsed = await parseFeedUrl(url);
       return (parsed.items ?? [])
         .map((item) => {
-          const title = (item.title ?? '').trim();
+          const title = cleanArticleText(item.title ?? '');
           const link = (item.link ?? '').trim();
           const publishedAt = item.isoDate ?? item.pubDate ?? new Date().toISOString();
           const extra = item as { subtitle?: string };
@@ -51,9 +177,9 @@ async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
           };
         })
         .filter((item) => {
-            const minLength = feed.minTextLength ?? MIN_TEXT_LENGTH;
-            return item.title && item.url && item.text.length >= minLength;
-          });
+          const minLength = feed.minTextLength ?? MIN_TEXT_LENGTH;
+          return item.title && item.url && item.text.length >= minLength;
+        });
     } catch (error) {
       lastError = error;
     }
@@ -108,7 +234,7 @@ function toIso(value: string | undefined): string {
 export async function collectSearchArticles(query: string): Promise<SearchHit[]> {
   let parsed;
   try {
-    parsed = await parser.parseURL(googleNewsSearchUrl(query));
+    parsed = await parseFeedUrl(googleNewsSearchUrl(query));
   } catch (error) {
     console.warn('Search feed failed', error);
     throw new Error('Não foi possível buscar notícias agora.');
@@ -123,7 +249,7 @@ export async function collectSearchArticles(query: string): Promise<SearchHit[]>
     }
 
     const link = (item.link ?? '').trim();
-    const rawTitle = (item.title ?? '').trim();
+    const rawTitle = cleanArticleText(item.title ?? '');
     if (!link || !rawTitle) {
       continue;
     }

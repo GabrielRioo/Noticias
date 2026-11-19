@@ -1,9 +1,13 @@
 import { NEWS_TOPICS, type GlossaryTerm, type NewsItem, type NewsTopic } from '../src/types/news.js';
 import { getGeminiConfig } from './env.js';
-import { extractLeadNumbers, missingNumbers } from './text.js';
+import {
+  enqueueGemini,
+  isGeminiModelRateLimited,
+  markGeminiModelRateLimited,
+} from './geminiQueue.js';
 import type { ArticleCluster } from './cluster.js';
 import { heuristicScore, longestText } from './cluster.js';
-import { enqueueGemini } from './geminiQueue.js';
+import { extractLeadNumbers, missingNumbers } from './text.js';
 
 export class GeminiUnavailableError extends Error {
   constructor(message: string) {
@@ -106,12 +110,11 @@ function parseModelJson(raw: string): ModelSummary | null {
   }
 }
 
-async function callGeminiOnce(prompt: string): Promise<string> {
-  const { apiKey, model } = getGeminiConfig();
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY ausente no arquivo .env');
-  }
-
+async function callGeminiWithModel(
+  apiKey: string,
+  model: string,
+  prompt: string,
+): Promise<string> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
@@ -153,6 +156,42 @@ async function callGeminiOnce(prompt: string): Promise<string> {
     throw new Error('Gemini devolveu resposta vazia');
   }
   return text;
+}
+
+async function callGeminiOnce(prompt: string): Promise<string> {
+  const { apiKey, models } = getGeminiConfig();
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY ausente no arquivo .env');
+  }
+
+  let lastRateLimit: GeminiUnavailableError | null = null;
+
+  for (const model of models) {
+    if (isGeminiModelRateLimited(model)) {
+      continue;
+    }
+
+    try {
+      const text = await callGeminiWithModel(apiKey, model, prompt);
+      if (model !== models[0]) {
+        console.warn(`Gemini fallback ok: ${model}`);
+      }
+      return text;
+    } catch (error) {
+      if (error instanceof GeminiUnavailableError && /cota do gemini esgotada/i.test(error.message)) {
+        markGeminiModelRateLimited(model);
+        console.warn(`Gemini ${model} sem cota; tentando próximo modelo.`);
+        lastRateLimit = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw (
+    lastRateLimit ??
+    new GeminiUnavailableError('Cota do Gemini esgotada em todos os modelos (429)')
+  );
 }
 
 function callGemini(prompt: string): Promise<string> {

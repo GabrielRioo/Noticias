@@ -26,10 +26,44 @@ export function loadEnvFile(): void {
   }
 }
 
-export function getGeminiConfig(): { apiKey: string; model: string } {
+/** Primary + fallbacks. Free-tier RPM/RPD are per model, so another model can still work. */
+const DEFAULT_GEMINI_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+];
+
+function uniqueModels(models: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const model of models) {
+    const trimmed = model.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+export function getGeminiConfig(): { apiKey: string; models: string[] } {
   const apiKey = process.env.GEMINI_API_KEY?.trim() ?? '';
-  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash-lite';
-  return { apiKey, model };
+  const primary = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODELS[0];
+  const explicitFallbacks = (process.env.GEMINI_MODEL_FALLBACKS ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const fallbacks =
+    explicitFallbacks.length > 0
+      ? explicitFallbacks
+      : DEFAULT_GEMINI_MODELS.filter((model) => model !== primary);
+
+  return {
+    apiKey,
+    models: uniqueModels([primary, ...fallbacks]),
+  };
 }
 
 export function getGeminiTtsConfig(): {

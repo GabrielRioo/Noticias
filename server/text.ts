@@ -1,6 +1,12 @@
+import { decodeHTML } from 'entities';
+
 const NOISE_PATTERNS = [
+  /(?:✅|📲|➡️)?\s*(?:Clique aqui para )?seguir o canal do g1[^\n.!?]{0,80}?(?:WhatsApp|Telegram)\.?\s*/gi,
+  /(?:✅|📲)\s*Siga o canal[^\n.!?]{0,120}?(?:WhatsApp|Telegram|Instagram|Facebook)\s*(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ' -]{1,50}:)?/gi,
+  /Siga o canal de notícias[^\n.!?]{0,100}?(?:WhatsApp|Telegram)\s*(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ' -]{1,50}:)?/gi,
   /Clique aqui e entre no grupo do WhatsApp[\s\S]*/gi,
   /LEIA MAIS:[\s\S]*/gi,
+  /➡️\s*VEJA O EDITAL COMPLETO[\s\S]*/gi,
   /Leia mais[\s\S]*/gi,
   /Veja mais notícias[\s\S]*/gi,
   /Assista aos vídeos[\s\S]*/gi,
@@ -8,20 +14,17 @@ const NOISE_PATTERNS = [
 ];
 
 export function stripHtml(value: string): string {
-  return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<img[\s\S]*?>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+  return decodeHTML(
+    value
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<img[\s\S]*?>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  )
+    .replace(/\uFFFD+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
