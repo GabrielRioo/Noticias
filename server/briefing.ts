@@ -9,6 +9,7 @@ import { FEEDS } from './feeds.js';
 import { collectArticles } from './rss.js';
 import {
   draftFromCluster,
+  isFeedDraftItem,
   isGeminiUnavailableError,
   summarizeCluster,
 } from './summarize.js';
@@ -56,9 +57,11 @@ function bestUnreadForTopic(
   topic: NewsTopic,
   excluded: ReadonlySet<string>,
 ): NewsItem | undefined {
-  return byRelevance(
+  const candidates = byRelevance(
     withBriefing(items).filter((item) => item.topic === topic && !excluded.has(item.id)),
-  )[0];
+  );
+  // Prefer a real AI briefing over a newer raw RSS draft.
+  return candidates.find((item) => !isFeedDraftItem(item)) ?? candidates[0];
 }
 
 function retainRecent(items: NewsItem[]): NewsItem[] {
@@ -221,7 +224,8 @@ async function fillTopics(
     } catch (error) {
       console.warn('Falha ao resumir cluster', candidate.id, error);
       if (isGeminiUnavailableError(error)) {
-        withoutAi = true;
+        // All models in the chain failed for this call — draft this topic,
+        // but keep trying AI on the next topics (another model may still work).
         items.push(draftFromCluster(candidate, topic));
         continue;
       }
@@ -237,11 +241,11 @@ async function fillTopics(
     draftUnreadTopic(clusters, items, known, topic, excluded);
   }
 
-  // Soft upgrade without AI: if a newer unknown story exists, surface it on refresh
-  // even when the topic already has an unread item.
+  // Soft upgrade without AI only when the current unread item is already a feed draft.
+  // Never bury an AI briefing under a newer raw RSS paste.
   for (const topic of topics) {
     const current = bestUnreadForTopic(items, topic, excluded);
-    if (!current) {
+    if (!current || !isFeedDraftItem(current)) {
       continue;
     }
 

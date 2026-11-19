@@ -110,6 +110,18 @@ function parseModelJson(raw: string): ModelSummary | null {
   }
 }
 
+class GeminiModelError extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+
+  constructor(message: string, status: number, retryable: boolean) {
+    super(message);
+    this.name = 'GeminiModelError';
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
 async function callGeminiWithModel(
   apiKey: string,
   model: string,
@@ -136,16 +148,29 @@ async function callGeminiWithModel(
       response.status === 429 ||
       /RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(body)
     ) {
-      throw new GeminiUnavailableError(
+      throw new GeminiModelError(
         `Cota do Gemini esgotada (${response.status})`,
+        response.status,
+        true,
       );
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new GeminiUnavailableError(
-        `Gemini recusou a chave (${response.status})`,
+    if (response.status === 401) {
+      // Bad key affects every model — stop the chain.
+      throw new GeminiUnavailableError(`Gemini recusou a chave (${response.status})`);
+    }
+    if (response.status === 403 || response.status === 404) {
+      // Model-specific access/name issues — try the next fallback.
+      throw new GeminiModelError(
+        `Gemini modelo ${model} indisponível (${response.status})`,
+        response.status,
+        true,
       );
     }
-    throw new Error(`Gemini recusou a chamada (${response.status})`);
+    throw new GeminiModelError(
+      `Gemini recusou a chamada (${response.status})`,
+      response.status,
+      response.status >= 500,
+    );
   }
 
   const payload = (await response.json()) as {
@@ -153,7 +178,7 @@ async function callGeminiWithModel(
   };
   const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   if (!text) {
-    throw new Error('Gemini devolveu resposta vazia');
+    throw new GeminiModelError('Gemini devolveu resposta vazia', 200, true);
   }
   return text;
 }
@@ -164,13 +189,16 @@ async function callGeminiOnce(prompt: string): Promise<string> {
     throw new Error('GEMINI_API_KEY ausente no arquivo .env');
   }
 
-  let lastRateLimit: GeminiUnavailableError | null = null;
+  let lastRetryable: Error | null = null;
+  let attempted = 0;
 
   for (const model of models) {
     if (isGeminiModelRateLimited(model)) {
+      console.warn(`Gemini ${model} em cooldown; pulando.`);
       continue;
     }
 
+    attempted += 1;
     try {
       const text = await callGeminiWithModel(apiKey, model, prompt);
       if (model !== models[0]) {
@@ -178,19 +206,28 @@ async function callGeminiOnce(prompt: string): Promise<string> {
       }
       return text;
     } catch (error) {
-      if (error instanceof GeminiUnavailableError && /cota do gemini esgotada/i.test(error.message)) {
+      if (error instanceof GeminiUnavailableError) {
+        throw error;
+      }
+      if (error instanceof GeminiModelError && error.retryable) {
         markGeminiModelRateLimited(model);
-        console.warn(`Gemini ${model} sem cota; tentando próximo modelo.`);
-        lastRateLimit = error;
+        console.warn(`Gemini ${model} falhou (${error.message}); tentando próximo modelo.`);
+        lastRetryable = error;
         continue;
       }
       throw error;
     }
   }
 
-  throw (
-    lastRateLimit ??
-    new GeminiUnavailableError('Cota do Gemini esgotada em todos os modelos (429)')
+  if (attempted === 0) {
+    throw new GeminiUnavailableError(
+      'Cota do Gemini esgotada em todos os modelos (cooldown)',
+    );
+  }
+
+  throw new GeminiUnavailableError(
+    lastRetryable?.message ??
+      'Cota do Gemini esgotada em todos os modelos (429)',
   );
 }
 
@@ -252,6 +289,13 @@ export async function summarizeCluster(
   };
 }
 
+export const FEED_DRAFT_NOTE =
+  'Texto do feed, sem resumo da IA. Confira a matéria original para o contexto completo.';
+
+export function isFeedDraftItem(item: Pick<NewsItem, 'whyItMatters'>): boolean {
+  return item.whyItMatters.includes('Texto do feed, sem resumo da IA');
+}
+
 /** Last-resort item so a topic is never blank when RSS still has something. */
 export function draftFromCluster(cluster: ArticleCluster, topic: NewsTopic): NewsItem {
   const article = longestText(cluster);
@@ -272,8 +316,7 @@ export function draftFromCluster(cluster: ArticleCluster, topic: NewsTopic): New
     title: article.title,
     briefing,
     bullets,
-    whyItMatters:
-      'Texto do feed, sem resumo da IA. Confira a matéria original para o contexto completo.',
+    whyItMatters: FEED_DRAFT_NOTE,
     topic,
     importance: Math.min(5, Math.max(1, heuristicScore(article))),
     publishedAt: article.publishedAt,

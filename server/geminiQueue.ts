@@ -1,7 +1,7 @@
 /** Free-tier Gemini is ~15 RPM per model. Keep a safe gap between calls. */
 const MIN_INTERVAL_MS = 4_500;
-const RATE_LIMIT_RETRY_MS = 20_000;
-const MODEL_COOLDOWN_MS = 60_000;
+const RATE_LIMIT_RETRY_MS = 15_000;
+const MODEL_COOLDOWN_MS = 45_000;
 
 let lastCallAt = 0;
 let queue: Promise<void> = Promise.resolve();
@@ -21,6 +21,10 @@ async function waitForSlot(): Promise<void> {
 
 export function markGeminiModelRateLimited(model: string): void {
   modelCooldownUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
+}
+
+export function clearGeminiModelCooldowns(): void {
+  modelCooldownUntil.clear();
 }
 
 export function isGeminiModelRateLimited(model: string): boolean {
@@ -46,7 +50,12 @@ export function enqueueGemini<T>(task: () => Promise<T>): Promise<T> {
       return await task();
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if (message.includes('(429)') || /cota do gemini esgotada/i.test(message)) {
+      if (
+        message.includes('(429)') ||
+        /cota do gemini esgotada/i.test(message) ||
+        /cooldown/i.test(message)
+      ) {
+        clearGeminiModelCooldowns();
         await sleep(RATE_LIMIT_RETRY_MS);
         await waitForSlot();
         return task();
